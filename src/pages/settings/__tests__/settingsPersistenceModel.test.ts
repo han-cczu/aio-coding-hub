@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { createTestAppSettings } from "../../../test/fixtures/settings";
 import {
   applyPersistedSettingsPatch,
   buildPersistedSettingsMutationInput,
@@ -11,14 +12,37 @@ import {
 
 describe("pages/settings/settingsPersistenceModel", () => {
   it("builds a normalized persisted snapshot from settings query data", () => {
-    const snapshot = buildPersistedSettingsSnapshot({
-      ...DEFAULT_PERSISTED_SETTINGS,
+    const settings = createTestAppSettings({
       cli_priority_order: ["gemini", "claude", "codex", "claude"],
-      show_home_heatmap: undefined as never,
-      show_home_usage: undefined as never,
-      start_minimized: undefined as never,
-      tray_enabled: undefined as never,
-    } as any);
+    });
+    Object.defineProperties(settings, {
+      show_home_heatmap: {
+        value: undefined,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      },
+      show_home_usage: {
+        value: undefined,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      },
+      start_minimized: {
+        value: undefined,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      },
+      tray_enabled: {
+        value: undefined,
+        configurable: true,
+        enumerable: true,
+        writable: true,
+      },
+    });
+
+    const snapshot = buildPersistedSettingsSnapshot(settings);
 
     expect(snapshot.show_home_heatmap).toBe(DEFAULT_PERSISTED_SETTINGS.show_home_heatmap);
     expect(snapshot.show_home_usage).toBe(DEFAULT_PERSISTED_SETTINGS.show_home_usage);

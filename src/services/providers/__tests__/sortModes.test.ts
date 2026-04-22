@@ -1,6 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import {
+  type SortModeActiveRow,
+  type SortModeProviderRow,
+  type SortModeSummary,
   sortModeActiveList,
   sortModeActiveSet,
   sortModeCreate,
@@ -33,22 +36,68 @@ vi.mock("../../../generated/bindings", async () => {
   };
 });
 
+function makeSortModeSummary(overrides: Partial<SortModeSummary> = {}): SortModeSummary {
+  return {
+    id: 1,
+    name: "Work",
+    created_at: 0,
+    updated_at: 0,
+    ...overrides,
+  };
+}
+
+function makeSortModeActiveRow(
+  overrides: Partial<SortModeActiveRow> = {}
+): SortModeActiveRow {
+  return {
+    cli_key: "claude",
+    mode_id: 1,
+    updated_at: 0,
+    ...overrides,
+  };
+}
+
+function makeSortModeProviderRow(
+  overrides: Partial<SortModeProviderRow> = {}
+): SortModeProviderRow {
+  return {
+    provider_id: 101,
+    enabled: true,
+    ...overrides,
+  };
+}
+
 describe("services/providers/sortModes", () => {
   it("invokes sort mode commands with expected parameters", async () => {
-    vi.mocked(commands.sortModesList).mockResolvedValue({ status: "ok", data: [] as any });
-    vi.mocked(commands.sortModeCreate).mockResolvedValue({ status: "ok", data: {} as any });
-    vi.mocked(commands.sortModeRename).mockResolvedValue({ status: "ok", data: {} as any });
+    vi.mocked(commands.sortModesList).mockResolvedValue({ status: "ok", data: [] });
+    vi.mocked(commands.sortModeCreate).mockResolvedValue({
+      status: "ok",
+      data: makeSortModeSummary({ id: 2, name: "M1" }),
+    });
+    vi.mocked(commands.sortModeRename).mockResolvedValue({
+      status: "ok",
+      data: makeSortModeSummary({ id: 1, name: "M2" }),
+    });
     vi.mocked(commands.sortModeDelete).mockResolvedValue({ status: "ok", data: true });
-    vi.mocked(commands.sortModeActiveList).mockResolvedValue({ status: "ok", data: [] as any });
-    vi.mocked(commands.sortModeActiveSet).mockResolvedValue({ status: "ok", data: {} as any });
-    vi.mocked(commands.sortModeProvidersList).mockResolvedValue({ status: "ok", data: [] as any });
+    vi.mocked(commands.sortModeActiveList).mockResolvedValue({
+      status: "ok",
+      data: [makeSortModeActiveRow()],
+    });
+    vi.mocked(commands.sortModeActiveSet).mockResolvedValue({
+      status: "ok",
+      data: makeSortModeActiveRow({ mode_id: null }),
+    });
+    vi.mocked(commands.sortModeProvidersList).mockResolvedValue({
+      status: "ok",
+      data: [makeSortModeProviderRow()],
+    });
     vi.mocked(commands.sortModeProvidersSetOrder).mockResolvedValue({
       status: "ok",
-      data: [] as any,
+      data: [makeSortModeProviderRow({ provider_id: 9 })],
     });
     vi.mocked(commands.sortModeProviderSetEnabled).mockResolvedValue({
       status: "ok",
-      data: {} as any,
+      data: makeSortModeProviderRow({ provider_id: 9, enabled: false }),
     });
 
     await sortModesList();
@@ -66,22 +115,22 @@ describe("services/providers/sortModes", () => {
     await sortModeActiveList();
     expect(commands.sortModeActiveList).toHaveBeenCalledWith();
 
-    await sortModeActiveSet({ cli_key: "claude" as any, mode_id: null });
+    await sortModeActiveSet({ cli_key: "claude", mode_id: null });
     expect(commands.sortModeActiveSet).toHaveBeenCalledWith("claude", null);
 
-    await sortModeProvidersList({ mode_id: 3, cli_key: "codex" as any });
+    await sortModeProvidersList({ mode_id: 3, cli_key: "codex" });
     expect(commands.sortModeProvidersList).toHaveBeenCalledWith(3, "codex");
 
     await sortModeProvidersSetOrder({
       mode_id: 4,
-      cli_key: "gemini" as any,
+      cli_key: "gemini",
       ordered_provider_ids: [9, 8, 7],
     });
     expect(commands.sortModeProvidersSetOrder).toHaveBeenCalledWith(4, "gemini", [9, 8, 7]);
 
     await sortModeProviderSetEnabled({
       mode_id: 5,
-      cli_key: "claude" as any,
+      cli_key: "claude",
       provider_id: 9,
       enabled: false,
     });

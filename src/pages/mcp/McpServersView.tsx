@@ -57,9 +57,6 @@ export function McpServersView({ workspaceId }: McpServersViewProps) {
           serverId: server.id,
           enabled: nextEnabled,
         });
-        if (!next) {
-          return;
-        }
 
         logToConsole("info", "切换 MCP Server 生效范围", {
           id: next.id,
@@ -108,10 +105,6 @@ export function McpServersView({ workspaceId }: McpServersViewProps) {
 
     try {
       const report = await importFromWorkspaceMutation.mutateAsync();
-      if (!report) {
-        return;
-      }
-
       const summary = formatImportSummary(report);
       toast(summary);
       logToConsole("info", "从当前 CLI 自动导入 MCP 完成", {

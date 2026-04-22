@@ -1,16 +1,21 @@
 import { QueryClientProvider } from "@tanstack/react-query";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ReactElement } from "react";
+import type { ButtonHTMLAttributes, ReactElement, ReactNode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import {
+  type McpImportReport,
   useMcpImportFromWorkspaceCliMutation,
   useMcpServerDeleteMutation,
   useMcpServerSetEnabledMutation,
   useMcpServersListQuery,
 } from "../../../query/mcp";
 import { logToConsole } from "../../../services/consoleLog";
+import { type McpServerSummary } from "../../../services/workspace/mcp";
 import { createTestQueryClient } from "../../../test/utils/reactQuery";
+import type { McpDeleteDialogProps } from "../components/McpDeleteDialog";
+import type { McpServerCardProps } from "../components/McpServerCard";
+import type { McpServerDialogProps } from "../components/McpServerDialog";
 import { McpServersView } from "../McpServersView";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
@@ -25,12 +30,20 @@ vi.mock("../../../ui/Button", () => ({
     size: _size,
     className: _className,
     ...rest
-  }: any) => (
+  }: {
+    children?: ReactNode;
+    onClick?: () => void;
+    disabled?: boolean;
+    variant?: unknown;
+    size?: unknown;
+    className?: string;
+    [key: string]: unknown;
+  }) => (
     <button
       type="button"
       data-disabled={disabled ? "true" : "false"}
       onClick={() => onClick?.()}
-      {...rest}
+      {...(rest as Omit<ButtonHTMLAttributes<HTMLButtonElement>, "onClick">)}
     >
       {children}
     </button>
@@ -38,7 +51,7 @@ vi.mock("../../../ui/Button", () => ({
 }));
 
 vi.mock("../components/McpServerCard", () => ({
-  McpServerCard: ({ server, toggling, onToggleEnabled, onEdit, onDelete }: any) => (
+  McpServerCard: ({ server, toggling, onToggleEnabled, onEdit, onDelete }: McpServerCardProps) => (
     <div data-testid={`server-card-${server.id}`}>
       <span>{server.name}</span>
       <span>{toggling ? "切换中" : "空闲"}</span>
@@ -56,7 +69,7 @@ vi.mock("../components/McpServerCard", () => ({
 }));
 
 vi.mock("../components/McpServerDialog", () => ({
-  McpServerDialog: ({ open, editTarget, workspaceId, onOpenChange }: any) => (
+  McpServerDialog: ({ open, editTarget, workspaceId, onOpenChange }: McpServerDialogProps) => (
     <div
       data-testid="server-dialog"
       data-open={open ? "true" : "false"}
@@ -73,7 +86,7 @@ vi.mock("../components/McpServerDialog", () => ({
 }));
 
 vi.mock("../components/McpDeleteDialog", () => ({
-  McpDeleteDialog: ({ target, deleting, onConfirm, onClose }: any) => (
+  McpDeleteDialog: ({ target, deleting, onConfirm, onClose }: McpDeleteDialogProps) => (
     <div
       data-testid="delete-dialog"
       data-target={target?.name ?? ""}
@@ -106,7 +119,7 @@ function renderWithQuery(element: ReactElement) {
   return render(<QueryClientProvider client={client}>{element}</QueryClientProvider>);
 }
 
-function createServer(overrides: Record<string, unknown> = {}) {
+function createServer(overrides: Partial<McpServerSummary> = {}): McpServerSummary {
   return {
     id: 1,
     server_key: "fetch",
@@ -116,14 +129,37 @@ function createServer(overrides: Record<string, unknown> = {}) {
     enabled: false,
     command: null,
     args: [],
-    env: {},
+    env_keys: [],
     cwd: null,
-    headers: {},
+    header_keys: [],
     created_at: 1,
     updated_at: 1,
     ...overrides,
-  } as any;
+  };
 }
+
+function createImportReport(overrides: Partial<McpImportReport> = {}): McpImportReport {
+  return {
+    inserted: 0,
+    updated: 0,
+    skipped: [],
+    ...overrides,
+  };
+}
+
+type ListQueryMock = Pick<ReturnType<typeof useMcpServersListQuery>, "data" | "isFetching" | "error">;
+type ToggleMutationMock = Pick<
+  ReturnType<typeof useMcpServerSetEnabledMutation>,
+  "isPending" | "mutateAsync"
+>;
+type DeleteMutationMock = Pick<
+  ReturnType<typeof useMcpServerDeleteMutation>,
+  "isPending" | "mutateAsync"
+>;
+type ImportMutationMock = Pick<
+  ReturnType<typeof useMcpImportFromWorkspaceCliMutation>,
+  "isPending" | "mutateAsync"
+>;
 
 function createMutation(options: { isPending?: boolean } = {}) {
   return {
@@ -134,26 +170,36 @@ function createMutation(options: { isPending?: boolean } = {}) {
 
 function mockView(
   options: {
-    data?: any[] | null;
+    data?: McpServerSummary[] | null;
     isFetching?: boolean;
-    error?: unknown;
-    toggleMutation?: ReturnType<typeof createMutation>;
-    deleteMutation?: ReturnType<typeof createMutation>;
-    importMutation?: ReturnType<typeof createMutation>;
+    error?: Error | null;
+    toggleMutation?: ToggleMutationMock;
+    deleteMutation?: DeleteMutationMock;
+    importMutation?: ImportMutationMock;
   } = {}
 ) {
   const toggleMutation = options.toggleMutation ?? createMutation();
   const deleteMutation = options.deleteMutation ?? createMutation();
   const importMutation = options.importMutation ?? createMutation();
 
-  vi.mocked(useMcpServersListQuery).mockReturnValue({
+  const listQuery: ListQueryMock = {
     data: options.data ?? [],
     isFetching: options.isFetching ?? false,
     error: options.error ?? null,
-  } as any);
-  vi.mocked(useMcpServerSetEnabledMutation).mockReturnValue(toggleMutation as any);
-  vi.mocked(useMcpServerDeleteMutation).mockReturnValue(deleteMutation as any);
-  vi.mocked(useMcpImportFromWorkspaceCliMutation).mockReturnValue(importMutation as any);
+  };
+
+  vi.mocked(useMcpServersListQuery).mockReturnValue(
+    listQuery as ReturnType<typeof useMcpServersListQuery>
+  );
+  vi.mocked(useMcpServerSetEnabledMutation).mockReturnValue(
+    toggleMutation as ReturnType<typeof useMcpServerSetEnabledMutation>
+  );
+  vi.mocked(useMcpServerDeleteMutation).mockReturnValue(
+    deleteMutation as ReturnType<typeof useMcpServerDeleteMutation>
+  );
+  vi.mocked(useMcpImportFromWorkspaceCliMutation).mockReturnValue(
+    importMutation as ReturnType<typeof useMcpImportFromWorkspaceCliMutation>
+  );
 
   return { toggleMutation, deleteMutation, importMutation };
 }
@@ -190,7 +236,7 @@ describe("pages/mcp/McpServersView", () => {
     expect(toast).toHaveBeenCalledWith("加载失败：请查看控制台日志");
   });
 
-  it("covers toggle pending guard plus success, null, and error branches", async () => {
+  it("covers toggle pending guard plus success and error branches", async () => {
     const server = createServer({ id: 7, enabled: true, name: "Runner" });
 
     const pendingToggle = createMutation({ isPending: true });
@@ -207,7 +253,6 @@ describe("pages/mcp/McpServersView", () => {
     const toggleMutation = createMutation();
     toggleMutation.mutateAsync
       .mockResolvedValueOnce({ ...server, enabled: false })
-      .mockResolvedValueOnce(null)
       .mockRejectedValueOnce(new Error("toggle boom"));
 
     mockView({
@@ -231,13 +276,6 @@ describe("pages/mcp/McpServersView", () => {
       enabled: false,
     });
     expect(toast).toHaveBeenCalledWith("已停用");
-
-    fireEvent.click(screen.getByRole("button", { name: "toggle-7" }));
-    await waitFor(() => {
-      expect(toggleMutation.mutateAsync).toHaveBeenCalledTimes(2);
-    });
-    expect(logToConsole).toHaveBeenCalledTimes(1);
-    expect(toast).toHaveBeenCalledTimes(1);
 
     fireEvent.click(screen.getByRole("button", { name: "toggle-7" }));
     await waitFor(() => {
@@ -318,7 +356,7 @@ describe("pages/mcp/McpServersView", () => {
     expect(screen.getByText("delete:none")).toBeInTheDocument();
   });
 
-  it("covers import guard, null branch, both summary branches, and error branch", async () => {
+  it("covers import guard, both summary branches, and error branch", async () => {
     const pendingImport = createMutation({ isPending: true });
     mockView({
       importMutation: pendingImport,
@@ -335,13 +373,14 @@ describe("pages/mcp/McpServersView", () => {
 
     const importMutation = createMutation();
     importMutation.mutateAsync
-      .mockResolvedValueOnce(null)
-      .mockResolvedValueOnce({ inserted: 2, updated: 1 })
-      .mockResolvedValueOnce({
-        inserted: 1,
-        updated: 0,
-        skipped: [{ name: "Fetch Tool", reason: "duplicate" }],
-      })
+      .mockResolvedValueOnce(createImportReport({ inserted: 2, updated: 1 }))
+      .mockResolvedValueOnce(
+        createImportReport({
+          inserted: 1,
+          updated: 0,
+          skipped: [{ name: "Fetch Tool", reason: "duplicate" }],
+        })
+      )
       .mockRejectedValueOnce(new Error("import boom"));
 
     mockView({
@@ -349,13 +388,6 @@ describe("pages/mcp/McpServersView", () => {
     });
 
     renderWithQuery(<McpServersView workspaceId={11} />);
-
-    fireEvent.click(screen.getByRole("button", { name: "导入已有" }));
-    await waitFor(() => {
-      expect(importMutation.mutateAsync).toHaveBeenCalledTimes(1);
-    });
-    expect(logToConsole).not.toHaveBeenCalled();
-    expect(toast).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole("button", { name: "导入已有" }));
     await waitFor(() => {

@@ -1,6 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { ModelPriceAliases, ModelPricesSyncReport } from "../../services/usage/modelPrices";
+import type {
+  ModelPriceAliases,
+  ModelPriceSummary,
+  ModelPricesSyncReport,
+} from "../../services/usage/modelPrices";
 import {
   modelPriceAliasesGet,
   modelPriceAliasesSet,
@@ -32,6 +36,33 @@ vi.mock("../../services/usage/modelPrices", async () => {
   };
 });
 
+function makeModelPriceSummary(
+  overrides: Partial<ModelPriceSummary> = {}
+): ModelPriceSummary {
+  return {
+    id: 1,
+    cli_key: "claude",
+    model: "claude-3-7-sonnet",
+    currency: "USD",
+    created_at: 1,
+    updated_at: 2,
+    ...overrides,
+  };
+}
+
+function makeModelPricesSyncReport(
+  overrides: Partial<ModelPricesSyncReport> = {}
+): ModelPricesSyncReport {
+  return {
+    status: "updated",
+    inserted: 1,
+    updated: 0,
+    skipped: 0,
+    total: 1,
+    ...overrides,
+  };
+}
+
 describe("query/modelPrices", () => {
   it("calls modelPricesList with tauri runtime", async () => {
     setTauriRuntime();
@@ -61,12 +92,15 @@ describe("query/modelPrices", () => {
     });
   });
 
-  it("useModelPricesTotalCountQuery sums list lengths and returns null if any list is null", async () => {
+  it("useModelPricesTotalCountQuery sums list lengths across all CLIs", async () => {
     setTauriRuntime();
 
     vi.mocked(modelPricesList)
-      .mockResolvedValueOnce([{ id: 1 } as any])
-      .mockResolvedValueOnce([{ id: 2 } as any, { id: 3 } as any])
+      .mockResolvedValueOnce([makeModelPriceSummary({ id: 1 })])
+      .mockResolvedValueOnce([
+        makeModelPriceSummary({ id: 2 }),
+        makeModelPriceSummary({ id: 3 }),
+      ])
       .mockResolvedValueOnce([]);
 
     const client = createTestQueryClient();
@@ -76,21 +110,6 @@ describe("query/modelPrices", () => {
 
     await waitFor(() => {
       expect(result.current.data).toBe(3);
-    });
-
-    vi.mocked(modelPricesList)
-      .mockResolvedValueOnce(null as any)
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([]);
-
-    const client2 = createTestQueryClient();
-    const wrapper2 = createQueryWrapper(client2);
-
-    const { result: result2 } = renderHook(() => useModelPricesTotalCountQuery(), {
-      wrapper: wrapper2,
-    });
-    await waitFor(() => {
-      expect(result2.current.data).toBeNull();
     });
   });
 
@@ -133,13 +152,7 @@ describe("query/modelPrices", () => {
   it("useModelPricesSyncBasellmMutation invalidates modelPricesKeys.all", async () => {
     setTauriRuntime();
 
-    const report: ModelPricesSyncReport = {
-      status: "updated",
-      inserted: 1,
-      updated: 0,
-      skipped: 0,
-      total: 1,
-    };
+    const report = makeModelPricesSyncReport();
     vi.mocked(modelPricesSyncBasellm).mockResolvedValue(report);
 
     const client = createTestQueryClient();
@@ -156,7 +169,11 @@ describe("query/modelPrices", () => {
 
   it("isModelPricesSyncNotModified detects not_modified reports", () => {
     expect(isModelPricesSyncNotModified(null)).toBe(false);
-    expect(isModelPricesSyncNotModified({ status: "updated" } as any)).toBe(false);
-    expect(isModelPricesSyncNotModified({ status: "not_modified" } as any)).toBe(true);
+    expect(isModelPricesSyncNotModified(makeModelPricesSyncReport({ status: "updated" }))).toBe(
+      false
+    );
+    expect(
+      isModelPricesSyncNotModified(makeModelPricesSyncReport({ status: "not_modified" }))
+    ).toBe(true);
   });
 });

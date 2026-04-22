@@ -7,9 +7,13 @@ import {
   requestLogsListAll,
   type RequestLogSummary,
 } from "../../services/gateway/requestLogs";
-import { createRequestLogSummary as createRequestLogSummaryFixture } from "../../services/gateway/requestLogFixtures";
+import {
+  createRequestLogDetail,
+  createRequestLogSummary as createRequestLogSummaryFixture,
+} from "../../services/gateway/requestLogFixtures";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
+import { requestLogsKeys } from "../keys";
 import {
   useRequestAttemptLogsByTraceIdQuery,
   useRequestLogDetailQuery,
@@ -123,7 +127,7 @@ describe("query/requestLogs", () => {
   it("calls requestLogGet when logId is provided", async () => {
     setTauriRuntime();
 
-    vi.mocked(requestLogGet).mockResolvedValue(null as any);
+    vi.mocked(requestLogGet).mockResolvedValue(createRequestLogDetail());
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
@@ -165,18 +169,18 @@ describe("query/requestLogs", () => {
     });
   });
 
-  it("incremental refresh mutation keeps backend rows and cache stable on null items", async () => {
+  it("incremental refresh mutation keeps backend rows and cache stable on empty incremental items", async () => {
     setTauriRuntime();
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
 
-    const listKey = ["requestLogs", "list", "all", 10] as any;
+    const listKey = requestLogsKeys.listAll(10);
 
     vi.mocked(requestLogsListAll).mockResolvedValueOnce([
       makeRequestLogSummary({ id: 1, created_at: 9, created_at_ms: null }),
       makeRequestLogSummary({ id: 2, created_at: 10, created_at_ms: null }),
-    ] as any);
+    ]);
     const { result } = renderHook(() => useRequestLogsIncrementalRefreshMutation(10), { wrapper });
 
     await act(async () => {
@@ -184,41 +188,50 @@ describe("query/requestLogs", () => {
       expect(res?.mode).toBe("full");
       expect(res?.items?.map((row) => row.id)).toEqual([1, 2]);
     });
-    expect((client.getQueryData<any[]>(listKey) ?? []).map((row) => row.id)).toEqual([2, 1]);
+    expect((client.getQueryData<RequestLogSummary[]>(listKey) ?? []).map((row) => row.id)).toEqual([
+      2,
+      1,
+    ]);
 
-    client.setQueryData(listKey, [makeRequestLogSummary({ id: 5, created_at: 10 })] as any);
+    client.setQueryData(listKey, [makeRequestLogSummary({ id: 5, created_at: 10 })]);
     vi.mocked(requestLogsListAfterIdAll).mockResolvedValueOnce([
       makeRequestLogSummary({ id: 6, created_at: 11 }),
       makeRequestLogSummary({ id: 7, created_at: 12 }),
-    ] as any);
+    ]);
     await act(async () => {
       const res = await result.current.mutateAsync();
       expect(res?.mode).toBe("incremental");
       expect(res?.items?.map((row) => row.id)).toEqual([6, 7]);
     });
-    expect((client.getQueryData<any[]>(listKey) ?? []).some((row) => row.id === 6)).toBe(true);
-    expect((client.getQueryData<any[]>(listKey) ?? []).some((row) => row.id === 7)).toBe(true);
+    expect((client.getQueryData<RequestLogSummary[]>(listKey) ?? []).some((row) => row.id === 6)).toBe(
+      true
+    );
+    expect((client.getQueryData<RequestLogSummary[]>(listKey) ?? []).some((row) => row.id === 7)).toBe(
+      true
+    );
 
     const nowSec2 = Math.floor(Date.now() / 1000);
     client.setQueryData(listKey, [
       makeRequestLogSummary({ id: 8, status: null, error_code: null, created_at: nowSec2 }),
-    ] as any);
+    ]);
     vi.mocked(requestLogsListAll).mockResolvedValueOnce([
       makeRequestLogSummary({ id: 8, status: 200, error_code: null, created_at: nowSec2 }),
-    ] as any);
+    ]);
     await act(async () => {
       const res = await result.current.mutateAsync();
       expect(res?.mode).toBe("full");
       expect(res?.items?.map((row) => row.id)).toEqual([8]);
     });
-    expect((client.getQueryData<any[]>(listKey) ?? [])[0]?.status).toBe(200);
+    expect((client.getQueryData<RequestLogSummary[]>(listKey) ?? [])[0]?.status).toBe(200);
 
-    vi.mocked(requestLogsListAfterIdAll).mockResolvedValueOnce(null as any);
+    vi.mocked(requestLogsListAfterIdAll).mockResolvedValueOnce([]);
     await act(async () => {
       const res = await result.current.mutateAsync();
       expect(res?.mode).toBe("incremental");
-      expect(res?.items).toBeNull();
+      expect(res?.items).toEqual([]);
     });
-    expect((client.getQueryData<any[]>(listKey) ?? []).some((row) => row.id === 8)).toBe(true);
+    expect((client.getQueryData<RequestLogSummary[]>(listKey) ?? []).some((row) => row.id === 8)).toBe(
+      true
+    );
   });
 });

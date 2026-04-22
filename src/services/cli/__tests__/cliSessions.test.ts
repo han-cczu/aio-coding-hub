@@ -1,6 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import {
+  type CliSessionsFolderLookupEntry,
+  type CliSessionsPaginatedMessages,
+  type CliSessionsProjectSummary,
+  type CliSessionsSessionSummary,
   cliSessionsFolderLookupByIds,
   cliSessionsProjectsList,
   cliSessionsSessionsList,
@@ -9,19 +13,88 @@ import {
   escapeShellArg,
 } from "../cliSessions";
 
+function makeCliSessionsProjectSummary(
+  overrides: Partial<CliSessionsProjectSummary> = {}
+): CliSessionsProjectSummary {
+  return {
+    source: "claude",
+    id: "proj-1",
+    display_path: "/tmp/project",
+    short_name: "project",
+    session_count: 1,
+    last_modified: null,
+    model_provider: null,
+    wsl_distro: null,
+    ...overrides,
+  };
+}
+
+function makeCliSessionsSessionSummary(
+  overrides: Partial<CliSessionsSessionSummary> = {}
+): CliSessionsSessionSummary {
+  return {
+    source: "claude",
+    session_id: "sess-1",
+    file_path: "/tmp/session.json",
+    first_prompt: null,
+    message_count: 0,
+    created_at: null,
+    modified_at: null,
+    git_branch: null,
+    project_path: null,
+    is_sidechain: null,
+    cwd: null,
+    model_provider: null,
+    cli_version: null,
+    wsl_distro: null,
+    ...overrides,
+  };
+}
+
+function makeCliSessionsPaginatedMessages(
+  overrides: Partial<CliSessionsPaginatedMessages> = {}
+): CliSessionsPaginatedMessages {
+  return {
+    messages: [],
+    total: 0,
+    page: 0,
+    page_size: 50,
+    has_more: false,
+    ...overrides,
+  };
+}
+
+function makeCliSessionsFolderLookupEntry(
+  overrides: Partial<CliSessionsFolderLookupEntry> = {}
+): CliSessionsFolderLookupEntry {
+  return {
+    source: "claude",
+    session_id: "s1",
+    folder_name: "project",
+    folder_path: "/tmp/project",
+    ...overrides,
+  };
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
-  vi.spyOn(commands, "cliSessionsProjectsList").mockResolvedValue({ status: "ok", data: [] } as any);
-  vi.spyOn(commands, "cliSessionsSessionsList").mockResolvedValue({ status: "ok", data: [] } as any);
+  vi.spyOn(commands, "cliSessionsProjectsList").mockResolvedValue({
+    status: "ok",
+    data: [makeCliSessionsProjectSummary()],
+  });
+  vi.spyOn(commands, "cliSessionsSessionsList").mockResolvedValue({
+    status: "ok",
+    data: [makeCliSessionsSessionSummary()],
+  });
   vi.spyOn(commands, "cliSessionsMessagesGet").mockResolvedValue({
     status: "ok",
-    data: { messages: [], total: 0, page: 0, page_size: 50, has_more: false },
-  } as any);
-  vi.spyOn(commands, "cliSessionsSessionDelete").mockResolvedValue({ status: "ok", data: [] } as any);
+    data: makeCliSessionsPaginatedMessages(),
+  });
+  vi.spyOn(commands, "cliSessionsSessionDelete").mockResolvedValue({ status: "ok", data: [] });
   vi.spyOn(commands, "cliSessionsFolderLookupByIds").mockResolvedValue({
     status: "ok",
-    data: [],
-  } as any);
+    data: [makeCliSessionsFolderLookupEntry()],
+  });
 });
 
 describe("services/cli/cliSessions", () => {

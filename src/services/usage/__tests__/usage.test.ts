@@ -2,6 +2,12 @@ import { describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import {
+  type UsageDayRow,
+  type UsageHourlyRow,
+  type UsageLeaderboardRow,
+  type UsageProviderCacheRateTrendRowV1,
+  type UsageProviderRow,
+  type UsageSummary,
   usageHourlySeries,
   usageLeaderboardDay,
   usageLeaderboardProvider,
@@ -38,6 +44,116 @@ vi.mock("../../consoleLog", async () => {
   };
 });
 
+function makeUsageSummary(overrides: Partial<UsageSummary> = {}): UsageSummary {
+  return {
+    requests_total: 1,
+    requests_with_usage: 1,
+    requests_success: 1,
+    requests_failed: 0,
+    cost_covered_success: 1,
+    avg_duration_ms: 120,
+    avg_ttfb_ms: 30,
+    avg_output_tokens_per_second: 10,
+    input_tokens: 100,
+    output_tokens: 200,
+    io_total_tokens: 300,
+    total_tokens: 300,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_creation_5m_input_tokens: 0,
+    cache_creation_1h_input_tokens: 0,
+    ...overrides,
+  };
+}
+
+function makeUsageProviderRow(overrides: Partial<UsageProviderRow> = {}): UsageProviderRow {
+  return {
+    cli_key: "claude",
+    provider_id: 1,
+    provider_name: "P1",
+    requests_total: 1,
+    requests_success: 1,
+    requests_failed: 0,
+    avg_duration_ms: 120,
+    avg_ttfb_ms: 30,
+    avg_output_tokens_per_second: 10,
+    input_tokens: 100,
+    output_tokens: 200,
+    total_tokens: 300,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_creation_5m_input_tokens: 0,
+    cache_creation_1h_input_tokens: 0,
+    ...overrides,
+  };
+}
+
+function makeUsageDayRow(overrides: Partial<UsageDayRow> = {}): UsageDayRow {
+  return {
+    day: "2026-04-22",
+    requests_total: 1,
+    input_tokens: 100,
+    output_tokens: 200,
+    total_tokens: 300,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_creation_5m_input_tokens: 0,
+    cache_creation_1h_input_tokens: 0,
+    ...overrides,
+  };
+}
+
+function makeUsageHourlyRow(overrides: Partial<UsageHourlyRow> = {}): UsageHourlyRow {
+  return {
+    day: "2026-04-22",
+    hour: 13,
+    requests_total: 1,
+    requests_with_usage: 1,
+    requests_success: 1,
+    requests_failed: 0,
+    total_tokens: 300,
+    ...overrides,
+  };
+}
+
+function makeUsageLeaderboardRow(
+  overrides: Partial<UsageLeaderboardRow> = {}
+): UsageLeaderboardRow {
+  return {
+    key: "provider:1",
+    name: "P1",
+    requests_total: 1,
+    requests_success: 1,
+    requests_failed: 0,
+    total_tokens: 300,
+    io_total_tokens: 300,
+    input_tokens: 100,
+    output_tokens: 200,
+    cache_creation_input_tokens: 0,
+    cache_read_input_tokens: 0,
+    avg_duration_ms: 120,
+    avg_ttfb_ms: 30,
+    avg_output_tokens_per_second: 10,
+    cost_usd: 1.23,
+    ...overrides,
+  };
+}
+
+function makeUsageProviderCacheRateTrendRow(
+  overrides: Partial<UsageProviderCacheRateTrendRowV1> = {}
+): UsageProviderCacheRateTrendRowV1 {
+  return {
+    day: "2026-04-22",
+    hour: null,
+    key: "provider:1",
+    name: "P1",
+    denom_tokens: 300,
+    cache_read_input_tokens: 30,
+    requests_success: 1,
+    ...overrides,
+  };
+}
+
 describe("services/usage/usage", () => {
   it("rethrows invoke errors and logs", async () => {
     vi.mocked(commands.usageSummary).mockRejectedValueOnce(new Error("usage boom"));
@@ -54,41 +170,53 @@ describe("services/usage/usage", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(commands.usageSummary).mockResolvedValueOnce(null as any);
+    vi.mocked(commands.usageSummary).mockResolvedValueOnce(null as never);
 
     await expect(usageSummary("today")).rejects.toThrow("IPC_NULL_RESULT: usage_summary");
   });
 
-  it("passes normalized args to generated commands", async () => {
-    vi.mocked(commands.usageSummary).mockResolvedValue({ status: "ok", data: {} as any });
+  it("passes normalized args and maps generated payloads", async () => {
+    vi.mocked(commands.usageSummary).mockResolvedValue({ status: "ok", data: makeUsageSummary() });
     vi.mocked(commands.usageLeaderboardProvider).mockResolvedValue({
       status: "ok",
-      data: [] as any,
+      data: [makeUsageProviderRow()],
     });
-    vi.mocked(commands.usageLeaderboardDay).mockResolvedValue({ status: "ok", data: [] as any });
-    vi.mocked(commands.usageHourlySeries).mockResolvedValue({ status: "ok", data: [] as any });
-    vi.mocked(commands.usageSummaryV2).mockResolvedValue({ status: "ok", data: {} as any });
-    vi.mocked(commands.usageLeaderboardV2).mockResolvedValue({ status: "ok", data: [] as any });
+    vi.mocked(commands.usageLeaderboardDay).mockResolvedValue({
+      status: "ok",
+      data: [makeUsageDayRow()],
+    });
+    vi.mocked(commands.usageHourlySeries).mockResolvedValue({
+      status: "ok",
+      data: [makeUsageHourlyRow()],
+    });
+    vi.mocked(commands.usageSummaryV2).mockResolvedValue({
+      status: "ok",
+      data: makeUsageSummary({ requests_total: 2 }),
+    });
+    vi.mocked(commands.usageLeaderboardV2).mockResolvedValue({
+      status: "ok",
+      data: [makeUsageLeaderboardRow()],
+    });
     vi.mocked(commands.usageProviderCacheRateTrendV1).mockResolvedValue({
       status: "ok",
-      data: [] as any,
+      data: [makeUsageProviderCacheRateTrendRow()],
     });
 
-    await usageSummary("today");
-    await usageSummary("last7", { cliKey: "claude" });
+    const todaySummary = await usageSummary("today");
+    const cliSummary = await usageSummary("last7", { cliKey: "claude" });
 
-    await usageLeaderboardProvider("today");
+    const providerRows = await usageLeaderboardProvider("today");
     await usageLeaderboardProvider("today", { cliKey: "codex", limit: 10 });
 
-    await usageLeaderboardDay("today");
+    const dayRows = await usageLeaderboardDay("today");
     await usageLeaderboardDay("today", { cliKey: "gemini", limit: 20 });
 
-    await usageHourlySeries(15);
+    const hourlyRows = await usageHourlySeries(15);
 
-    await usageSummaryV2("custom");
+    const summaryV2 = await usageSummaryV2("custom");
     await usageSummaryV2("custom", { startTs: 1, endTs: 2, cliKey: "gemini", providerId: 7 });
 
-    await usageLeaderboardV2("provider", "custom");
+    const leaderboardRows = await usageLeaderboardV2("provider", "custom");
     await usageLeaderboardV2("provider", "custom", {
       startTs: 1,
       endTs: 2,
@@ -97,13 +225,22 @@ describe("services/usage/usage", () => {
       limit: null,
     });
 
-    await usageProviderCacheRateTrendV1("daily", {
+    const cacheRateRows = await usageProviderCacheRateTrendV1("daily", {
       startTs: 1,
       endTs: 2,
       cliKey: "claude",
       providerId: 11,
       limit: 20,
     });
+
+    expect(todaySummary.requests_total).toBe(1);
+    expect(cliSummary.requests_success).toBe(1);
+    expect(providerRows[0]?.cli_key).toBe("claude");
+    expect(dayRows[0]?.day).toBe("2026-04-22");
+    expect(hourlyRows[0]?.hour).toBe(13);
+    expect(summaryV2.requests_total).toBe(2);
+    expect(leaderboardRows[0]?.key).toBe("provider:1");
+    expect(cacheRateRows[0]?.key).toBe("provider:1");
 
     expect(commands.usageSummary).toHaveBeenNthCalledWith(1, "today", null);
     expect(commands.usageSummary).toHaveBeenNthCalledWith(2, "last7", "claude");

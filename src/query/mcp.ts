@@ -49,7 +49,6 @@ export function useMcpServerUpsertMutation(workspaceId: number) {
       headers?: McpSecretPatchInput;
     }) => mcpServerUpsert(input),
     onSuccess: (next) => {
-      if (!next) return;
       queryClient.setQueryData<McpServerSummary[]>(mcpKeys.serversList(workspaceId), (cur) => {
         const prev = cur ?? [];
         const exists = prev.some((s) => s.id === next.id);
@@ -71,7 +70,6 @@ export function useMcpServerSetEnabledMutation(workspaceId: number) {
         enabled: input.enabled,
       }),
     onSuccess: (next) => {
-      if (!next) return;
       queryClient.setQueryData<McpServerSummary[]>(mcpKeys.serversList(workspaceId), (cur) =>
         (cur ?? []).map((s) => (s.id === next.id ? next : s))
       );
@@ -99,8 +97,7 @@ export function useMcpImportServersMutation(workspaceId: number) {
   return useMutation({
     mutationFn: async (servers: McpImportServer[]) =>
       mcpImportServers({ workspaceId, servers }),
-    onSuccess: (report) => {
-      if (!report) return;
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: mcpKeys.serversList(workspaceId) });
     },
   });
@@ -111,8 +108,7 @@ export function useMcpImportFromWorkspaceCliMutation(workspaceId: number) {
 
   return useMutation({
     mutationFn: async () => mcpImportFromWorkspaceCli(workspaceId),
-    onSuccess: (report) => {
-      if (!report) return;
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: mcpKeys.serversList(workspaceId) });
     },
   });

@@ -1,7 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { logToConsole } from "../../consoleLog";
-import { modelPricesSyncBasellm, setLastModelPricesSync } from "../../usage/modelPrices";
-import { promptsDefaultSyncFromFiles } from "../../workspace/prompts";
+import {
+  modelPricesSyncBasellm,
+  setLastModelPricesSync,
+  type ModelPricesSyncReport,
+} from "../../usage/modelPrices";
+import {
+  promptsDefaultSyncFromFiles,
+  type DefaultPromptSyncReport,
+} from "../../workspace/prompts";
 
 vi.mock("../../consoleLog", () => ({ logToConsole: vi.fn() }));
 vi.mock("../../usage/modelPrices", async () => {
@@ -20,6 +27,34 @@ async function importFreshStartup() {
   return await import("../startup");
 }
 
+function makeModelPricesSyncReport(
+  overrides: Partial<ModelPricesSyncReport> = {}
+): ModelPricesSyncReport {
+  return {
+    status: "updated",
+    inserted: 1,
+    updated: 0,
+    skipped: 0,
+    total: 1,
+    ...overrides,
+  };
+}
+
+function makeDefaultPromptSyncReport(
+  overrides: Partial<DefaultPromptSyncReport> = {}
+): DefaultPromptSyncReport {
+  return {
+    items: [
+      {
+        cli_key: "claude",
+        action: "created",
+        message: null,
+      },
+    ],
+    ...overrides,
+  };
+}
+
 describe("services/app/startup", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -28,23 +63,18 @@ describe("services/app/startup", () => {
   it("startupSyncModelPricesOnce always calls modelPricesSyncBasellm", async () => {
     const { startupSyncModelPricesOnce } = await importFreshStartup();
 
-    vi.mocked(modelPricesSyncBasellm).mockResolvedValueOnce({
-      status: "updated",
-      inserted: 1,
-      updated: 2,
-      skipped: 3,
-      total: 6,
-    } as any);
-
-    await startupSyncModelPricesOnce();
-    expect(modelPricesSyncBasellm).toHaveBeenCalledWith(false);
-    expect(setLastModelPricesSync).toHaveBeenCalledWith({
-      status: "updated",
+    const report = makeModelPricesSyncReport({
       inserted: 1,
       updated: 2,
       skipped: 3,
       total: 6,
     });
+
+    vi.mocked(modelPricesSyncBasellm).mockResolvedValueOnce(report);
+
+    await startupSyncModelPricesOnce();
+    expect(modelPricesSyncBasellm).toHaveBeenCalledWith(false);
+    expect(setLastModelPricesSync).toHaveBeenCalledWith(report);
     expect(logToConsole).toHaveBeenCalledWith(
       "info",
       "启动同步：模型定价同步完成",
@@ -52,23 +82,16 @@ describe("services/app/startup", () => {
     );
   });
 
-  it("startupSyncModelPricesOnce skips when report is null", async () => {
-    const m = await importFreshStartup();
-    vi.mocked(modelPricesSyncBasellm).mockResolvedValueOnce(null as any);
-    await m.startupSyncModelPricesOnce();
-    expect(setLastModelPricesSync).not.toHaveBeenCalled();
-    expect(logToConsole).not.toHaveBeenCalledWith("info", expect.anything(), expect.anything());
-  });
-
   it("startupSyncModelPricesOnce only runs once per session", async () => {
     const m = await importFreshStartup();
-    vi.mocked(modelPricesSyncBasellm).mockResolvedValueOnce({
-      status: "updated",
-      inserted: 0,
-      updated: 0,
-      skipped: 0,
-      total: 0,
-    } as any);
+    vi.mocked(modelPricesSyncBasellm).mockResolvedValueOnce(
+      makeModelPricesSyncReport({
+        inserted: 0,
+        updated: 0,
+        skipped: 0,
+        total: 0,
+      })
+    );
 
     await m.startupSyncModelPricesOnce();
     expect(modelPricesSyncBasellm).toHaveBeenCalledTimes(1);
@@ -90,9 +113,15 @@ describe("services/app/startup", () => {
   it("startupSyncDefaultPromptsFromFilesOncePerSession dedupes and logs action summary", async () => {
     const m = await importFreshStartup();
 
-    vi.mocked(promptsDefaultSyncFromFiles).mockResolvedValueOnce({
-      items: [{ action: "add" }, { action: "error" }, { action: "add" }],
-    } as any);
+    vi.mocked(promptsDefaultSyncFromFiles).mockResolvedValueOnce(
+      makeDefaultPromptSyncReport({
+        items: [
+          { cli_key: "claude", action: "created", message: null },
+          { cli_key: "claude", action: "error", message: "broken" },
+          { cli_key: "codex", action: "created", message: null },
+        ],
+      })
+    );
 
     const p1 = m.startupSyncDefaultPromptsFromFilesOncePerSession();
     const p2 = m.startupSyncDefaultPromptsFromFilesOncePerSession();
@@ -103,7 +132,7 @@ describe("services/app/startup", () => {
       "error",
       "初始化：default 提示词与本机文件同步完成",
       expect.objectContaining({
-        summary: { add: 2, error: 1 },
+        summary: { created: 2, error: 1 },
       })
     );
   });

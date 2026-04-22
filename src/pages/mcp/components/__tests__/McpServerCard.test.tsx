@@ -1,8 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { McpServerSummary } from "../../../../services/workspace/mcp";
 import { McpServerCard } from "../McpServerCard";
 
-function createServer(overrides: Record<string, unknown> = {}) {
+function createServer(overrides: Partial<McpServerSummary> = {}): McpServerSummary {
   return {
     id: 1,
     server_key: "fetch",
@@ -12,13 +13,13 @@ function createServer(overrides: Record<string, unknown> = {}) {
     enabled: false,
     command: null,
     args: [],
-    env: {},
+    env_keys: [],
     cwd: null,
-    headers: {},
+    header_keys: [],
     created_at: 1,
     updated_at: 1,
     ...overrides,
-  } as any;
+  };
 }
 
 describe("pages/mcp/components/McpServerCard", () => {

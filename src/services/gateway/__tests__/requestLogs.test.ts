@@ -3,6 +3,7 @@ import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import { createRequestLogDetail } from "../requestLogFixtures";
 import {
+  type RequestAttemptLog,
   requestAttemptLogsByTraceId,
   requestLogGet,
   requestLogGetByTraceId,
@@ -31,6 +32,24 @@ vi.mock("../../../generated/bindings", async () => {
   };
 });
 
+function makeRequestAttemptLog(overrides: Partial<RequestAttemptLog> = {}): RequestAttemptLog {
+  return {
+    id: 1,
+    trace_id: "trace-1",
+    cli_key: "claude",
+    attempt_index: 0,
+    provider_id: 1,
+    provider_name: "Provider",
+    base_url: "https://example.com",
+    outcome: "success",
+    status: 200,
+    attempt_started_ms: 1,
+    attempt_duration_ms: 2,
+    created_at: 1,
+    ...overrides,
+  };
+}
+
 vi.mock("../../consoleLog", async () => {
   const actual = await vi.importActual<typeof import("../../consoleLog")>("../../consoleLog");
   return {
@@ -55,7 +74,7 @@ describe("services/gateway/requestLogs", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(commands.requestLogsList).mockResolvedValueOnce({ status: "ok", data: null as any });
+    vi.mocked(commands.requestLogsList).mockResolvedValueOnce({ status: "ok", data: null as never });
 
     await expect(requestLogsList("claude", 10)).rejects.toThrow(
       "IPC_NULL_RESULT: request_logs_list"
@@ -63,15 +82,15 @@ describe("services/gateway/requestLogs", () => {
   });
 
   it("passes request logs command args with stable contract fields", async () => {
-    vi.mocked(commands.requestLogsList).mockResolvedValueOnce({ status: "ok", data: [] as any });
-    vi.mocked(commands.requestLogsListAll).mockResolvedValueOnce({ status: "ok", data: [] as any });
+    vi.mocked(commands.requestLogsList).mockResolvedValueOnce({ status: "ok", data: [] });
+    vi.mocked(commands.requestLogsListAll).mockResolvedValueOnce({ status: "ok", data: [] });
     vi.mocked(commands.requestLogsListAfterId).mockResolvedValueOnce({
       status: "ok",
-      data: [] as any,
+      data: [],
     });
     vi.mocked(commands.requestLogsListAfterIdAll).mockResolvedValueOnce({
       status: "ok",
-      data: [] as any,
+      data: [],
     });
     vi.mocked(commands.requestLogGet).mockResolvedValueOnce({
       status: "ok",
@@ -79,11 +98,11 @@ describe("services/gateway/requestLogs", () => {
     });
     vi.mocked(commands.requestLogGetByTraceId).mockResolvedValueOnce({
       status: "ok",
-      data: null as any,
+      data: null,
     });
     vi.mocked(commands.requestAttemptLogsByTraceId).mockResolvedValueOnce({
       status: "ok",
-      data: [] as any,
+      data: [makeRequestAttemptLog()],
     });
 
     await requestLogsList("claude", 10);

@@ -53,10 +53,6 @@ export async function handleOAuthLogin(ctx: OAuthActionContext) {
       }
 
       const saved = await ctx.persistProvider(built.value.payload);
-      if (!saved) {
-        toast("自动保存 Provider 失败");
-        return;
-      }
       targetProviderId = saved.id;
       autoSavedProviderId = saved.id;
       shouldRollbackAutoSavedProvider = true;

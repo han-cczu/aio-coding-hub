@@ -32,89 +32,103 @@ export type ClaudeEnvSetInput = {
   disableErrorReporting: boolean;
 };
 
-function toCodexConfigPatch(patch: CodexConfigPatch) {
+const DEFAULT_CODEX_CONFIG_PATCH = {
+  model: null,
+  approval_policy: null,
+  sandbox_mode: null,
+  model_reasoning_effort: null,
+  plan_mode_reasoning_effort: null,
+  web_search: null,
+  personality: null,
+  model_context_window: null,
+  model_auto_compact_token_limit: null,
+  service_tier: null,
+  sandbox_workspace_write_network_access: null,
+  features_unified_exec: null,
+  features_shell_snapshot: null,
+  features_apply_patch_freeform: null,
+  features_shell_tool: null,
+  features_exec_policy: null,
+  features_remote_compaction: null,
+  features_fast_mode: null,
+  features_responses_websockets_v2: null,
+  features_multi_agent: null,
+} satisfies GeneratedCodexConfigPatch;
+
+const DEFAULT_GEMINI_CONFIG_PATCH = {
+  modelName: null,
+  modelMaxSessionTurns: null,
+  modelCompressionThreshold: null,
+  defaultApprovalMode: null,
+  enableAutoUpdate: null,
+  enableNotifications: null,
+  vimMode: null,
+  retryFetchErrors: null,
+  maxAttempts: null,
+  uiTheme: null,
+  uiHideBanner: null,
+  uiHideTips: null,
+  uiShowLineNumbers: null,
+  uiInlineThinkingMode: null,
+  usageStatisticsEnabled: null,
+  sessionRetentionEnabled: null,
+  sessionRetentionMaxAge: null,
+  planModelRouting: null,
+  securityAuthSelectedType: null,
+} satisfies GeneratedGeminiConfigPatch;
+
+const DEFAULT_CLAUDE_SETTINGS_PATCH = {
+  model: null,
+  output_style: null,
+  language: null,
+  always_thinking_enabled: null,
+  show_turn_duration: null,
+  spinner_tips_enabled: null,
+  terminal_progress_bar_enabled: null,
+  respect_gitignore: null,
+  disable_git_participant: null,
+  permissions_allow: null,
+  permissions_ask: null,
+  permissions_deny: null,
+  env_mcp_timeout_ms: null,
+  env_mcp_tool_timeout_ms: null,
+  env_experimental_agent_teams: null,
+  env_claude_code_auto_compact_window: null,
+  env_disable_background_tasks: null,
+  env_disable_terminal_title: null,
+  env_claude_bash_no_login: null,
+  env_claude_code_attribution_header: null,
+  env_claude_code_blocking_limit_override: null,
+  env_claude_code_max_output_tokens: null,
+  env_enable_experimental_mcp_cli: null,
+  env_enable_tool_search: null,
+  env_max_mcp_output_tokens: null,
+  env_claude_code_disable_nonessential_traffic: null,
+  env_claude_code_disable_1m_context: null,
+  env_claude_code_proxy_resolves_hosts: null,
+  env_claude_code_skip_prompt_history: null,
+} satisfies GeneratedClaudeSettingsPatch;
+
+function withGeneratedPatchDefaults<TPatch extends object>(
+  defaults: TPatch,
+  patch: Partial<TPatch>
+): TPatch {
   return {
-    model: patch.model ?? null,
-    approval_policy: patch.approval_policy ?? null,
-    sandbox_mode: patch.sandbox_mode ?? null,
-    model_reasoning_effort: patch.model_reasoning_effort ?? null,
-    plan_mode_reasoning_effort: patch.plan_mode_reasoning_effort ?? null,
-    web_search: patch.web_search ?? null,
-    personality: patch.personality ?? null,
-    model_context_window: patch.model_context_window ?? null,
-    model_auto_compact_token_limit: patch.model_auto_compact_token_limit ?? null,
-    service_tier: patch.service_tier ?? null,
-    sandbox_workspace_write_network_access: patch.sandbox_workspace_write_network_access ?? null,
-    features_unified_exec: patch.features_unified_exec ?? null,
-    features_shell_snapshot: patch.features_shell_snapshot ?? null,
-    features_apply_patch_freeform: patch.features_apply_patch_freeform ?? null,
-    features_shell_tool: patch.features_shell_tool ?? null,
-    features_exec_policy: patch.features_exec_policy ?? null,
-    features_remote_compaction: patch.features_remote_compaction ?? null,
-    features_fast_mode: patch.features_fast_mode ?? null,
-    features_responses_websockets_v2: patch.features_responses_websockets_v2 ?? null,
-    features_multi_agent: patch.features_multi_agent ?? null,
+    ...defaults,
+    ...patch,
   };
 }
 
-function toGeminiConfigPatch(patch: GeminiConfigPatch) {
-  return {
-    modelName: patch.modelName ?? null,
-    modelMaxSessionTurns: patch.modelMaxSessionTurns ?? null,
-    modelCompressionThreshold: patch.modelCompressionThreshold ?? null,
-    defaultApprovalMode: patch.defaultApprovalMode ?? null,
-    enableAutoUpdate: patch.enableAutoUpdate ?? null,
-    enableNotifications: patch.enableNotifications ?? null,
-    vimMode: patch.vimMode ?? null,
-    retryFetchErrors: patch.retryFetchErrors ?? null,
-    maxAttempts: patch.maxAttempts ?? null,
-    uiTheme: patch.uiTheme ?? null,
-    uiHideBanner: patch.uiHideBanner ?? null,
-    uiHideTips: patch.uiHideTips ?? null,
-    uiShowLineNumbers: patch.uiShowLineNumbers ?? null,
-    uiInlineThinkingMode: patch.uiInlineThinkingMode ?? null,
-    usageStatisticsEnabled: patch.usageStatisticsEnabled ?? null,
-    sessionRetentionEnabled: patch.sessionRetentionEnabled ?? null,
-    sessionRetentionMaxAge: patch.sessionRetentionMaxAge ?? null,
-    planModelRouting: patch.planModelRouting ?? null,
-    securityAuthSelectedType: patch.securityAuthSelectedType ?? null,
-  };
+function toCodexConfigPatch(patch: CodexConfigPatch): GeneratedCodexConfigPatch {
+  return withGeneratedPatchDefaults(DEFAULT_CODEX_CONFIG_PATCH, patch);
 }
 
-function toClaudeSettingsPatch(patch: ClaudeSettingsPatch) {
-  return {
-    model: patch.model ?? null,
-    output_style: patch.output_style ?? null,
-    language: patch.language ?? null,
-    always_thinking_enabled: patch.always_thinking_enabled ?? null,
-    show_turn_duration: patch.show_turn_duration ?? null,
-    spinner_tips_enabled: patch.spinner_tips_enabled ?? null,
-    terminal_progress_bar_enabled: patch.terminal_progress_bar_enabled ?? null,
-    respect_gitignore: patch.respect_gitignore ?? null,
-    disable_git_participant: patch.disable_git_participant ?? null,
-    permissions_allow: patch.permissions_allow ?? null,
-    permissions_ask: patch.permissions_ask ?? null,
-    permissions_deny: patch.permissions_deny ?? null,
-    env_mcp_timeout_ms: patch.env_mcp_timeout_ms ?? null,
-    env_mcp_tool_timeout_ms: patch.env_mcp_tool_timeout_ms ?? null,
-    env_experimental_agent_teams: patch.env_experimental_agent_teams ?? null,
-    env_claude_code_auto_compact_window: patch.env_claude_code_auto_compact_window ?? null,
-    env_disable_background_tasks: patch.env_disable_background_tasks ?? null,
-    env_disable_terminal_title: patch.env_disable_terminal_title ?? null,
-    env_claude_bash_no_login: patch.env_claude_bash_no_login ?? null,
-    env_claude_code_attribution_header: patch.env_claude_code_attribution_header ?? null,
-    env_claude_code_blocking_limit_override:
-      patch.env_claude_code_blocking_limit_override ?? null,
-    env_claude_code_max_output_tokens: patch.env_claude_code_max_output_tokens ?? null,
-    env_enable_experimental_mcp_cli: patch.env_enable_experimental_mcp_cli ?? null,
-    env_enable_tool_search: patch.env_enable_tool_search ?? null,
-    env_max_mcp_output_tokens: patch.env_max_mcp_output_tokens ?? null,
-    env_claude_code_disable_nonessential_traffic:
-      patch.env_claude_code_disable_nonessential_traffic ?? null,
-    env_claude_code_disable_1m_context: patch.env_claude_code_disable_1m_context ?? null,
-    env_claude_code_proxy_resolves_hosts: patch.env_claude_code_proxy_resolves_hosts ?? null,
-    env_claude_code_skip_prompt_history: patch.env_claude_code_skip_prompt_history ?? null,
-  };
+function toGeminiConfigPatch(patch: GeminiConfigPatch): GeneratedGeminiConfigPatch {
+  return withGeneratedPatchDefaults(DEFAULT_GEMINI_CONFIG_PATCH, patch);
+}
+
+function toClaudeSettingsPatch(patch: ClaudeSettingsPatch): GeneratedClaudeSettingsPatch {
+  return withGeneratedPatchDefaults(DEFAULT_CLAUDE_SETTINGS_PATCH, patch);
 }
 
 export async function cliManagerClaudeInfoGet() {

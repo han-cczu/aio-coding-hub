@@ -235,8 +235,8 @@ describe("pages/providers/ProviderEditorDialog", () => {
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
-  it("toasts when provider upsert is unavailable (returns null)", async () => {
-    vi.mocked(providerUpsert).mockResolvedValue(null as any);
+  it("keeps the dialog open when provider upsert rejects during create save", async () => {
+    vi.mocked(providerUpsert).mockRejectedValueOnce(new Error("save failed"));
 
     const onSaved = vi.fn();
     const onOpenChange = vi.fn();
@@ -262,6 +262,9 @@ describe("pages/providers/ProviderEditorDialog", () => {
     fireEvent.click(dialog.getByRole("button", { name: "保存" }));
 
     await waitFor(() => expect(vi.mocked(providerUpsert)).toHaveBeenCalledTimes(1));
+    await waitFor(() =>
+      expect(vi.mocked(toast)).toHaveBeenCalledWith(expect.stringContaining("保存失败"))
+    );
     expect(onSaved).not.toHaveBeenCalled();
     expect(onOpenChange).not.toHaveBeenCalled();
   });
@@ -821,7 +824,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
   });
 
   it("copies saved API key in edit mode without loading plaintext into the form", async () => {
-    vi.mocked(providerCopyApiKeyToClipboard).mockResolvedValueOnce(true as any);
+    vi.mocked(providerCopyApiKeyToClipboard).mockResolvedValueOnce(true);
 
     render(
       <ProviderEditorDialog
@@ -1249,7 +1252,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce(
       makeOAuthStartFlowResult({ success: false, provider_id: 99 })
     );
-    vi.mocked(providerDelete).mockResolvedValueOnce(true as any);
+    vi.mocked(providerDelete).mockResolvedValueOnce(true);
 
     render(
       <ProviderEditorDialog
@@ -1294,7 +1297,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
     vi.mocked(providerOAuthStartFlow).mockResolvedValueOnce(
       makeOAuthStartFlowResult({ success: false, provider_id: 102 })
     );
-    vi.mocked(providerDelete).mockResolvedValueOnce(false as any);
+    vi.mocked(providerDelete).mockResolvedValueOnce(false);
 
     render(
       <ProviderEditorDialog
@@ -1558,7 +1561,7 @@ describe("pages/providers/ProviderEditorDialog", () => {
       })
     );
     vi.mocked(providerOAuthStartFlow).mockRejectedValueOnce(new Error("OAuth boom"));
-    vi.mocked(providerDelete).mockResolvedValueOnce(true as any);
+    vi.mocked(providerDelete).mockResolvedValueOnce(true);
 
     render(
       <ProviderEditorDialog
@@ -1798,8 +1801,8 @@ describe("pages/providers/ProviderEditorDialog", () => {
     );
   });
 
-  it("auto-save returns null during OAuth login in create mode", async () => {
-    vi.mocked(providerUpsert).mockResolvedValueOnce(null as any);
+  it("surfaces auto-save rejection during OAuth login in create mode", async () => {
+    vi.mocked(providerUpsert).mockRejectedValueOnce(new Error("save boom"));
 
     render(
       <ProviderEditorDialog
@@ -1819,7 +1822,12 @@ describe("pages/providers/ProviderEditorDialog", () => {
 
     fireEvent.click(dialog.getByRole("button", { name: "OAuth 登录" }));
 
-    await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("自动保存 Provider 失败"));
+    await waitFor(() =>
+      expect(vi.mocked(toast)).toHaveBeenCalledWith(
+        expect.stringContaining("OAuth 登录失败：Error: save boom")
+      )
+    );
+    expect(vi.mocked(providerOAuthStartFlow)).not.toHaveBeenCalled();
   });
 
   it("supports adding and removing tags via keyboard", async () => {
@@ -2087,14 +2095,18 @@ describe("pages/providers/ProviderEditorDialog", () => {
     expect(dialog.getByRole("button", { name: "保存" })).toBeInTheDocument();
   });
 
-  it("handles edit mode with null claude_models, tags and limits", () => {
+  it("handles edit mode with generated-authority empty values", () => {
     const provider = makeProvider({
-      claude_models: null as any,
-      tags: null as any,
-      note: null as any,
-      daily_reset_mode: null as any,
-      daily_reset_time: null as any,
-      cost_multiplier: null as any,
+      claude_models: {
+        main_model: null,
+        reasoning_model: null,
+        haiku_model: null,
+        sonnet_model: null,
+        opus_model: null,
+      },
+      tags: [],
+      note: "",
+      cost_multiplier: 0,
     });
 
     render(

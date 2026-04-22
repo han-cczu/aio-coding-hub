@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { McpServerSummary } from "../../../../services/workspace/mcp";
 import { McpDeleteDialog } from "../McpDeleteDialog";
 
-function createTarget() {
+function createTarget(overrides: Partial<McpServerSummary> = {}): McpServerSummary {
   return {
     id: 7,
     server_key: "fetch",
@@ -12,12 +13,13 @@ function createTarget() {
     enabled: true,
     command: null,
     args: [],
-    env: {},
+    env_keys: [],
     cwd: null,
-    headers: {},
+    header_keys: [],
     created_at: 1,
     updated_at: 1,
-  } as any;
+    ...overrides,
+  };
 }
 
 describe("pages/mcp/components/McpDeleteDialog", () => {

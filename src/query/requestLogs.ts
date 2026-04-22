@@ -12,10 +12,9 @@ import {
 } from "../services/gateway/requestLogState";
 import { requestLogsKeys } from "./keys";
 
-type RequestLogsListQueryResult = RequestLogSummary[] | null;
 type RequestLogsIncrementalRefreshResult = {
   mode: "full" | "incremental";
-  items: RequestLogSummary[] | null;
+  items: RequestLogSummary[];
 };
 
 function isRequestLogsQueryEnabled(enabled: boolean | undefined) {
@@ -58,7 +57,7 @@ export function useRequestLogsListAllQuery(
   options?: { enabled?: boolean; refetchIntervalMs?: number | false }
 ) {
   const enabled = isRequestLogsQueryEnabled(options?.enabled);
-  return useQuery<RequestLogsListQueryResult>({
+  return useQuery<RequestLogSummary[]>({
     queryKey: requestLogsKeys.listAll(limit),
     queryFn: async () => {
       const rows = await requestLogsListAll(limit);
@@ -91,7 +90,6 @@ export function useRequestLogsIncrementalRefreshMutation(limit: number) {
     },
     onSuccess: (result) => {
       if (!result) return;
-      if (!result.items) return;
 
       if (result.mode === "full") {
         queryClient.setQueryData(
@@ -104,7 +102,7 @@ export function useRequestLogsIncrementalRefreshMutation(limit: number) {
       if (result.items.length === 0) return;
 
       queryClient.setQueryData<RequestLogSummary[]>(requestLogsKeys.listAll(limit), (cur) =>
-        mergeRequestLogs(cur ?? [], result.items ?? [], limit)
+        mergeRequestLogs(cur ?? [], result.items, limit)
       );
     },
   });

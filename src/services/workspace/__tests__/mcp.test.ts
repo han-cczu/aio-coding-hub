@@ -2,6 +2,10 @@ import { describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import {
+  type McpImportReport,
+  type McpImportServer,
+  type McpParseResult,
+  type McpServerSummary,
   mcpImportFromWorkspaceCli,
   mcpImportServers,
   mcpParseJson,
@@ -38,6 +42,65 @@ vi.mock("../../consoleLog", async () => {
   };
 });
 
+function makeMcpServerSummary(
+  overrides: Partial<McpServerSummary> = {}
+): McpServerSummary {
+  return {
+    id: 1,
+    server_key: "fetch",
+    name: "Fetch",
+    transport: "stdio",
+    command: null,
+    args: [],
+    env_keys: [],
+    cwd: null,
+    url: null,
+    header_keys: [],
+    enabled: true,
+    created_at: 1,
+    updated_at: 1,
+    ...overrides,
+  };
+}
+
+function makeMcpImportServer(
+  overrides: Partial<McpImportServer> = {}
+): McpImportServer {
+  return {
+    server_key: "fetch",
+    name: "Fetch",
+    transport: "http",
+    command: null,
+    args: [],
+    env: {},
+    cwd: null,
+    url: "http://127.0.0.1:3000",
+    headers: { Authorization: "x" },
+    enabled: true,
+    ...overrides,
+  };
+}
+
+function makeMcpParseResult(
+  overrides: Partial<McpParseResult> = {}
+): McpParseResult {
+  return {
+    servers: [makeMcpImportServer()],
+    ...overrides,
+  };
+}
+
+function makeMcpImportReport(
+  overrides: Partial<McpImportReport> = {}
+): McpImportReport {
+  return {
+    inserted: 0,
+    updated: 0,
+    skipped: [],
+    ...overrides,
+  };
+}
+
 describe("services/workspace/mcp", () => {
   it("rethrows invoke errors and logs", async () => {
     vi.mocked(commands.mcpServersList).mockRejectedValueOnce(new Error("mcp boom"));
@@ -54,67 +117,43 @@ describe("services/workspace/mcp", () => {
   });
 
   it("treats null invoke result as error with runtime", async () => {
-    vi.mocked(commands.mcpServersList).mockResolvedValueOnce(null as any);
+    vi.mocked(commands.mcpServersList).mockResolvedValueOnce(null as never);
 
     await expect(mcpServersList(1)).rejects.toThrow("IPC_NULL_RESULT: mcp_servers_list");
   });
 
-  it("invokes generated commands with normalized args", async () => {
-    vi.mocked(commands.mcpServersList).mockResolvedValueOnce({ status: "ok", data: [] as any });
+  it("invokes generated commands with normalized args and typed payloads", async () => {
+    vi.mocked(commands.mcpServersList).mockResolvedValueOnce({
+      status: "ok",
+      data: [makeMcpServerSummary()],
+    });
     vi.mocked(commands.mcpServerUpsert).mockResolvedValueOnce({
       status: "ok",
-      data: {
-        id: 1,
-        server_key: "fetch",
-        name: "Fetch",
-        transport: "stdio",
-        command: null,
-        args: [],
-        env_keys: [],
-        cwd: null,
-        url: null,
-        header_keys: [],
-        enabled: true,
-        created_at: 1,
-        updated_at: 1,
-      } as any,
+      data: makeMcpServerSummary(),
     });
     vi.mocked(commands.mcpServerSetEnabled).mockResolvedValueOnce({
       status: "ok",
-      data: {
-        id: 2,
-        server_key: "fetch",
-        name: "Fetch",
-        transport: "stdio",
-        command: null,
-        args: [],
-        env_keys: [],
-        cwd: null,
-        url: null,
-        header_keys: [],
-        enabled: false,
-        created_at: 1,
-        updated_at: 2,
-      } as any,
+      data: makeMcpServerSummary({ id: 2, enabled: false, updated_at: 2 }),
     });
     vi.mocked(commands.mcpServerDelete).mockResolvedValueOnce({ status: "ok", data: true });
     vi.mocked(commands.mcpParseJson).mockResolvedValueOnce({
       status: "ok",
-      data: { servers: [] } as any,
+      data: makeMcpParseResult(),
     });
     vi.mocked(commands.mcpImportFromWorkspaceCli).mockResolvedValueOnce({
       status: "ok",
-      data: { inserted: 0, updated: 0, skipped: [] } as any,
+      data: makeMcpImportReport(),
     });
     vi.mocked(commands.mcpImportServers).mockResolvedValueOnce({
       status: "ok",
-      data: { inserted: 0, updated: 1, skipped: [] } as any,
+      data: makeMcpImportReport({ updated: 1 }),
     });
 
-    await mcpServersList(7);
+    const listRows = await mcpServersList(7);
     expect(commands.mcpServersList).toHaveBeenNthCalledWith(1, { workspaceId: 7 });
+    expect(listRows[0]?.transport).toBe("stdio");
 
-    await mcpServerUpsert({
+    const created = await mcpServerUpsert({
       serverKey: "fetch",
       name: "Fetch",
       transport: "stdio",
@@ -137,43 +176,34 @@ describe("services/workspace/mcp", () => {
         replace: {},
       },
     });
+    expect(created.transport).toBe("stdio");
 
-    await mcpServerSetEnabled({ workspaceId: 9, serverId: 2, enabled: false });
+    const updated = await mcpServerSetEnabled({ workspaceId: 9, serverId: 2, enabled: false });
     expect(commands.mcpServerSetEnabled).toHaveBeenCalledWith({
       workspaceId: 9,
       serverId: 2,
       enabled: false,
     });
+    expect(updated.enabled).toBe(false);
 
     await mcpServerDelete(123);
     expect(commands.mcpServerDelete).toHaveBeenCalledWith({ serverId: 123 });
 
-    await mcpParseJson('{"mcpServers":[]}');
+    const parsed = await mcpParseJson('{"mcpServers":[]}');
     expect(commands.mcpParseJson).toHaveBeenCalledWith({
       jsonText: '{"mcpServers":[]}',
     });
+    expect(parsed.servers[0]?.transport).toBe("http");
 
-    await mcpImportFromWorkspaceCli(3);
+    const imported = await mcpImportFromWorkspaceCli(3);
     expect(commands.mcpImportFromWorkspaceCli).toHaveBeenCalledWith({
       workspaceId: 3,
     });
+    expect(imported.inserted).toBe(0);
 
-    await mcpImportServers({
+    const report = await mcpImportServers({
       workspaceId: 1,
-      servers: [
-        {
-          server_key: "fetch",
-          name: "Fetch",
-          transport: "http",
-          command: null,
-          args: [],
-          env: {},
-          cwd: null,
-          url: "http://127.0.0.1:3000",
-          headers: { Authorization: "x" },
-          enabled: true,
-        },
-      ],
+      servers: [makeMcpImportServer()],
     });
     expect(commands.mcpImportServers).toHaveBeenCalledWith({
       workspaceId: 1,
@@ -185,5 +215,6 @@ describe("services/workspace/mcp", () => {
         }),
       ],
     });
+    expect(report.updated).toBe(1);
   });
 });

@@ -256,14 +256,7 @@ export function useSortModesDataModel({
           throw result.error;
         }
 
-        const rows = result.data ?? null;
-        if (!rows) {
-          setModeProvidersAvailable(false);
-          setModeProviders(EMPTY_MODE_PROVIDERS);
-          modeProvidersRef.current = EMPTY_MODE_PROVIDERS;
-          return;
-        }
-
+        const rows = result.data ?? EMPTY_MODE_PROVIDERS;
         setModeProvidersAvailable(true);
         setModeProviders(rows);
         modeProvidersRef.current = rows;
@@ -311,9 +304,6 @@ export function useSortModesDataModel({
     setCreateModeSaving(true);
     try {
       const saved = await createSortModeMutation.mutateAsync({ name });
-      if (!saved) {
-        return;
-      }
       setSortModes((prev) => [...prev, saved]);
       selectEditingMode(saved.id);
       setCreateModeDialogOpen(false);
@@ -338,9 +328,6 @@ export function useSortModesDataModel({
     setRenameModeSaving(true);
     try {
       const saved = await renameSortModeMutation.mutateAsync({ modeId: selectedMode.id, name });
-      if (!saved) {
-        return;
-      }
       setSortModes((prev) => prev.map((mode) => (mode.id === saved.id ? saved : mode)));
       setRenameModeDialogOpen(false);
       toast("排序模板已更新");
@@ -402,14 +389,6 @@ export function useSortModesDataModel({
         cliKey,
         orderedProviderIds: nextRows.map((row) => row.provider_id),
       });
-
-      if (!saved) {
-        if (activeModeIdRef.current === modeId && activeCliRef.current === cliKey) {
-          setModeProviders(prevRows);
-          modeProvidersRef.current = prevRows;
-        }
-        return;
-      }
 
       if (activeModeIdRef.current === modeId && activeCliRef.current === cliKey) {
         setModeProviders(saved);
@@ -486,14 +465,6 @@ export function useSortModesDataModel({
         providerId,
         enabled,
       });
-
-      if (!saved) {
-        if (activeModeIdRef.current === modeId && activeCliRef.current === cliKey) {
-          setModeProviders(prevRows);
-          modeProvidersRef.current = prevRows;
-        }
-        return;
-      }
 
       if (activeModeIdRef.current === modeId && activeCliRef.current === cliKey) {
         const finalRows = nextRows.map((row) => (row.provider_id === providerId ? saved : row));

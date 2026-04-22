@@ -105,7 +105,7 @@ describe("pages/providers/SortModesView", () => {
     expect(screen.getByText("选择要配置的 CLI")).toBeInTheDocument();
   });
 
-  it("covers providers list cancelled + ids null branches and active auto-selection edge cases", async () => {
+  it("covers providers list cancellation and active auto-selection edge cases", async () => {
     vi.mocked(toast).mockClear();
     sortableIsDragging = false;
 
@@ -115,8 +115,7 @@ describe("pages/providers/SortModesView", () => {
       { cli_key: "codex", mode_id: 999 },
     ] as any);
 
-    // 1) ids null -> modeProvidersAvailable=false
-    vi.mocked(sortModeProvidersList).mockResolvedValueOnce(null as any);
+    vi.mocked(sortModeProvidersList).mockResolvedValueOnce([]);
 
     renderWithQueryClient(
       <SortModesView
@@ -245,7 +244,7 @@ describe("pages/providers/SortModesView", () => {
     // Delete mode
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     const deleteDialog = within(screen.getByRole("dialog"));
-    vi.mocked(sortModeDelete).mockResolvedValue(true as any);
+    vi.mocked(sortModeDelete).mockResolvedValue(true);
     fireEvent.click(deleteDialog.getByRole("button", { name: "确认删除" }));
     await waitFor(() => expect(vi.mocked(sortModeDelete)).toHaveBeenCalledWith({ mode_id: 2 }));
   });
@@ -305,7 +304,7 @@ describe("pages/providers/SortModesView", () => {
     );
   });
 
-  it("covers create/rename/delete null + error branches and delete dialog onOpenChange gating", async () => {
+  it("covers create/rename validation, error branches, and delete dialog gating", async () => {
     vi.mocked(toast).mockClear();
     sortableIsDragging = false;
 
@@ -333,13 +332,9 @@ describe("pages/providers/SortModesView", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Work" })).toBeInTheDocument());
 
-    // create: null -> no-op
-    vi.mocked(sortModeCreate).mockResolvedValueOnce(null as any);
     fireEvent.click(screen.getByRole("button", { name: "新建排序模板" }));
     const createDialog = within(screen.getByRole("dialog"));
     fireEvent.change(createDialog.getByPlaceholderText("工作"), { target: { value: "Life" } });
-    fireEvent.click(createDialog.getByRole("button", { name: "创建" }));
-    await waitFor(() => expect(vi.mocked(sortModeCreate)).toHaveBeenCalledTimes(1));
 
     // create: throws -> error toast
     vi.mocked(sortModeCreate).mockRejectedValueOnce(new Error("boom"));
@@ -361,11 +356,7 @@ describe("pages/providers/SortModesView", () => {
     fireEvent.click(renameDialog.getByRole("button", { name: "保存" }));
     await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalledWith("模式名称不能为空"));
 
-    // rename: null -> no-op
-    vi.mocked(sortModeRename).mockResolvedValueOnce(null as any);
     fireEvent.change(renameDialog.getByRole("textbox"), { target: { value: "Work2" } });
-    fireEvent.click(renameDialog.getByRole("button", { name: "保存" }));
-    await waitFor(() => expect(vi.mocked(sortModeRename)).toHaveBeenCalledTimes(1));
 
     // rename: throws -> error toast
     vi.mocked(sortModeRename).mockRejectedValueOnce(new Error("boom"));
@@ -382,7 +373,7 @@ describe("pages/providers/SortModesView", () => {
     // delete: ok=false -> no-op
     fireEvent.click(screen.getByRole("button", { name: "删除" }));
     const deleteDialog = within(screen.getByRole("dialog"));
-    vi.mocked(sortModeDelete).mockResolvedValueOnce(false as any);
+    vi.mocked(sortModeDelete).mockResolvedValueOnce(false);
     fireEvent.click(deleteDialog.getByRole("button", { name: "确认删除" }));
     await waitFor(() => expect(vi.mocked(sortModeDelete)).toHaveBeenCalledTimes(1));
 
@@ -402,7 +393,7 @@ describe("pages/providers/SortModesView", () => {
     const deletePromise = new Promise<boolean>((resolve) => {
       resolveDelete = resolve;
     });
-    vi.mocked(sortModeDelete).mockReturnValueOnce(deletePromise as any);
+    vi.mocked(sortModeDelete).mockImplementationOnce(() => deletePromise);
     fireEvent.click(deleteDialog.getByRole("button", { name: "确认删除" }));
     // Attempt to close by overlay while deleting (should stay open)
     fireEvent.click(document.querySelector(".bg-black\\/30") as HTMLElement);
@@ -448,7 +439,7 @@ describe("pages/providers/SortModesView", () => {
     sortableIsDragging = false;
   });
 
-  it("covers remove provider and persist order null/error branches", async () => {
+  it("covers remove provider and persist order error/success branches", async () => {
     vi.mocked(toast).mockClear();
     vi.mocked(sortModesList).mockResolvedValue([{ id: 1, name: "Work" }] as any);
     vi.mocked(sortModeActiveList).mockResolvedValue([{ cli_key: "claude", mode_id: 1 }] as any);
@@ -458,7 +449,6 @@ describe("pages/providers/SortModesView", () => {
     ] as any);
 
     vi.mocked(sortModeProvidersSetOrder)
-      .mockResolvedValueOnce(null as any)
       .mockRejectedValueOnce(new Error("boom"))
       .mockResolvedValueOnce([{ provider_id: 102, enabled: true }] as any);
 
@@ -486,20 +476,15 @@ describe("pages/providers/SortModesView", () => {
     // pointerdown handler stops propagation (coverage)
     fireEvent.pointerDown(screen.getAllByRole("button", { name: "移除" })[0]!);
 
-    // 1) persist returns null -> revert
+    // 1) persist throws -> toast and revert
     fireEvent.click(screen.getAllByRole("button", { name: "移除" })[0]!);
     await waitFor(() => expect(vi.mocked(sortModeProvidersSetOrder)).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "移除" })).toHaveLength(2));
-
-    // 2) persist throws -> toast and revert
-    fireEvent.click(screen.getAllByRole("button", { name: "移除" })[0]!);
-    await waitFor(() => expect(vi.mocked(sortModeProvidersSetOrder)).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalled());
     await waitFor(() => expect(screen.getAllByRole("button", { name: "移除" })).toHaveLength(2));
 
-    // 3) persist succeeds -> P1 removed from mode
+    // 2) persist succeeds -> P1 removed from mode
     fireEvent.click(screen.getAllByRole("button", { name: "移除" })[0]!);
-    await waitFor(() => expect(vi.mocked(sortModeProvidersSetOrder)).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(vi.mocked(sortModeProvidersSetOrder)).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(screen.getAllByRole("button", { name: "移除" })).toHaveLength(1));
 
     // drag end edge cases

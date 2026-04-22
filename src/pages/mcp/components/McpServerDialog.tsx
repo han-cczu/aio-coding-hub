@@ -430,7 +430,7 @@ export function McpServerDialog({
 
     try {
       const parsed = await mcpParseJson(trimmed);
-      if (parsed?.servers?.length) {
+      if (parsed.servers.length) {
         const server = parsed.servers[0];
         applyDraft(
           fromImportServer({
@@ -504,10 +504,6 @@ export function McpServerDialog({
         url: !isStdio ? url : null,
         headers: !isStdio ? patch : { preserveKeys: [], replace: {} },
       });
-
-      if (!next) {
-        return;
-      }
 
       logToConsole("info", editTarget ? "更新 MCP Server" : "新增 MCP Server", {
         id: next.id,

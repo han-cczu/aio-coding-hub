@@ -1,6 +1,11 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import {
+  type ClaudeCliInfo,
+  type ClaudeSettingsState,
+  type CodexConfigState,
+  type CodexConfigTomlState,
+  type SimpleCliInfo,
   cliManagerClaudeInfoGet,
   cliManagerClaudeSettingsGet,
   cliManagerClaudeSettingsSet,
@@ -45,16 +50,124 @@ vi.mock("../../services/cli/cliManager", async () => {
   };
 });
 
+function makeSimpleCliInfo(overrides: Partial<SimpleCliInfo> = {}): SimpleCliInfo {
+  return {
+    found: true,
+    executable_path: "/usr/bin/codex",
+    version: "0.0.0",
+    error: null,
+    shell: "zsh",
+    resolved_via: "PATH",
+    ...overrides,
+  };
+}
+
+function makeClaudeCliInfo(overrides: Partial<ClaudeCliInfo> = {}): ClaudeCliInfo {
+  return {
+    ...makeSimpleCliInfo(),
+    config_dir: "/tmp/.claude",
+    settings_path: "/tmp/.claude/settings.json",
+    mcp_timeout_ms: null,
+    disable_error_reporting: false,
+    ...overrides,
+  };
+}
+
+function makeClaudeSettingsState(
+  overrides: Partial<ClaudeSettingsState> = {}
+): ClaudeSettingsState {
+  return {
+    config_dir: "/tmp/.claude",
+    settings_path: "/tmp/.claude/settings.json",
+    exists: true,
+    model: null,
+    output_style: null,
+    language: null,
+    always_thinking_enabled: null,
+    show_turn_duration: null,
+    spinner_tips_enabled: null,
+    terminal_progress_bar_enabled: null,
+    respect_gitignore: null,
+    disable_git_participant: false,
+    permissions_allow: [],
+    permissions_ask: [],
+    permissions_deny: [],
+    env_mcp_timeout_ms: null,
+    env_mcp_tool_timeout_ms: null,
+    env_experimental_agent_teams: false,
+    env_claude_code_auto_compact_window: null,
+    env_disable_background_tasks: false,
+    env_disable_terminal_title: false,
+    env_claude_bash_no_login: false,
+    env_claude_code_attribution_header: false,
+    env_claude_code_blocking_limit_override: null,
+    env_claude_code_max_output_tokens: null,
+    env_enable_experimental_mcp_cli: false,
+    env_enable_tool_search: false,
+    env_max_mcp_output_tokens: null,
+    env_claude_code_disable_nonessential_traffic: false,
+    env_claude_code_disable_1m_context: false,
+    env_claude_code_proxy_resolves_hosts: false,
+    env_claude_code_skip_prompt_history: false,
+    ...overrides,
+  };
+}
+
+function makeCodexConfigState(overrides: Partial<CodexConfigState> = {}): CodexConfigState {
+  return {
+    config_dir: "/tmp/.codex",
+    config_path: "/tmp/.codex/config.toml",
+    user_home_default_dir: "/tmp/.codex",
+    user_home_default_path: "/tmp/.codex/config.toml",
+    follow_codex_home_dir: "/tmp/.codex",
+    follow_codex_home_path: "/tmp/.codex/config.toml",
+    can_open_config_dir: true,
+    exists: true,
+    model: null,
+    approval_policy: null,
+    sandbox_mode: null,
+    model_reasoning_effort: null,
+    plan_mode_reasoning_effort: null,
+    web_search: null,
+    personality: null,
+    model_context_window: null,
+    model_auto_compact_token_limit: null,
+    service_tier: null,
+    sandbox_workspace_write_network_access: null,
+    features_unified_exec: null,
+    features_shell_snapshot: null,
+    features_apply_patch_freeform: null,
+    features_shell_tool: null,
+    features_exec_policy: null,
+    features_remote_compaction: null,
+    features_fast_mode: null,
+    features_responses_websockets_v2: null,
+    features_multi_agent: null,
+    ...overrides,
+  };
+}
+
+function makeCodexConfigTomlState(
+  overrides: Partial<CodexConfigTomlState> = {}
+): CodexConfigTomlState {
+  return {
+    config_path: "/tmp/.codex/config.toml",
+    exists: true,
+    toml: "",
+    ...overrides,
+  };
+}
+
 describe("query/cliManager", () => {
   it("calls cliManager queries with tauri runtime", async () => {
     setTauriRuntime();
 
-    vi.mocked(cliManagerClaudeInfoGet).mockResolvedValue({ found: true } as any);
-    vi.mocked(cliManagerClaudeSettingsGet).mockResolvedValue({ exists: true } as any);
-    vi.mocked(cliManagerCodexInfoGet).mockResolvedValue({ found: true } as any);
-    vi.mocked(cliManagerCodexConfigGet).mockResolvedValue({ exists: true } as any);
-    vi.mocked(cliManagerCodexConfigTomlGet).mockResolvedValue({ exists: true, toml: "" } as any);
-    vi.mocked(cliManagerGeminiInfoGet).mockResolvedValue({ found: true } as any);
+    vi.mocked(cliManagerClaudeInfoGet).mockResolvedValue(makeClaudeCliInfo());
+    vi.mocked(cliManagerClaudeSettingsGet).mockResolvedValue(makeClaudeSettingsState());
+    vi.mocked(cliManagerCodexInfoGet).mockResolvedValue(makeSimpleCliInfo());
+    vi.mocked(cliManagerCodexConfigGet).mockResolvedValue(makeCodexConfigState());
+    vi.mocked(cliManagerCodexConfigTomlGet).mockResolvedValue(makeCodexConfigTomlState());
+    vi.mocked(cliManagerGeminiInfoGet).mockResolvedValue(makeSimpleCliInfo());
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
@@ -117,11 +230,11 @@ describe("query/cliManager", () => {
   it("useCliManagerClaudeSettingsSetMutation updates cache and invalidates", async () => {
     setTauriRuntime();
 
-    const updated = { exists: true, model: "claude" } as any;
+    const updated = makeClaudeSettingsState({ model: "claude" });
     vi.mocked(cliManagerClaudeSettingsSet).mockResolvedValue(updated);
 
     const client = createTestQueryClient();
-    client.setQueryData(cliManagerKeys.claudeSettings(), { exists: true, model: "old" });
+    client.setQueryData(cliManagerKeys.claudeSettings(), makeClaudeSettingsState({ model: "old" }));
     const invalidateSpy = vi.spyOn(client, "invalidateQueries");
     const wrapper = createQueryWrapper(client);
 
@@ -137,11 +250,11 @@ describe("query/cliManager", () => {
   it("useCliManagerCodexConfigSetMutation updates cache and invalidates", async () => {
     setTauriRuntime();
 
-    const updated = { exists: true, model: "gpt-5" } as any;
+    const updated = makeCodexConfigState({ model: "gpt-5" });
     vi.mocked(cliManagerCodexConfigSet).mockResolvedValue(updated);
 
     const client = createTestQueryClient();
-    client.setQueryData(cliManagerKeys.codexConfig(), { exists: true, model: "old" });
+    client.setQueryData(cliManagerKeys.codexConfig(), makeCodexConfigState({ model: "old" }));
     const invalidateSpy = vi.spyOn(client, "invalidateQueries");
     const wrapper = createQueryWrapper(client);
 
@@ -157,7 +270,7 @@ describe("query/cliManager", () => {
   it("useCliManagerCodexConfigTomlSetMutation updates config cache and invalidates config+toml", async () => {
     setTauriRuntime();
 
-    const updated = { exists: true, model: "gpt-5" } as any;
+    const updated = makeCodexConfigState({ model: "gpt-5" });
     vi.mocked(cliManagerCodexConfigTomlSet).mockResolvedValue(updated);
 
     const client = createTestQueryClient();
@@ -210,7 +323,7 @@ describe("query/cliManager", () => {
 
   it("pickCliAvailable maps info to availability state", () => {
     expect(pickCliAvailable(null)).toBe("unavailable");
-    expect(pickCliAvailable({ found: false } as any)).toBe("unavailable");
-    expect(pickCliAvailable({ found: true } as any)).toBe("available");
+    expect(pickCliAvailable(makeSimpleCliInfo({ found: false }))).toBe("unavailable");
+    expect(pickCliAvailable(makeSimpleCliInfo({ found: true }))).toBe("available");
   });
 });

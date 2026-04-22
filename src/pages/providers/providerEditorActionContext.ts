@@ -98,13 +98,13 @@ export type SaveActionContext = ProviderActionContext &
   ProviderEditorPayloadContext &
   Pick<FormActionContext, "saving" | "setSaving" | "form"> &
   Pick<AuthActionContext, "oauthStatus" | "setOauthStatus" | "refreshOauthStatus"> & {
-    persistProvider: (input: ProviderUpsertInput) => Promise<ProviderSummary | null>;
+    persistProvider: (input: ProviderUpsertInput) => Promise<ProviderSummary>;
   };
 
 export type OAuthActionContext = ProviderActionContext &
   ProviderEditorPayloadContext &
   Pick<FormActionContext, "form"> &
   Pick<AuthActionContext, "oauthStatus" | "setOauthStatus" | "refreshOauthStatus" | "setOauthLoading"> & {
-    persistProvider: (input: ProviderUpsertInput) => Promise<ProviderSummary | null>;
+    persistProvider: (input: ProviderUpsertInput) => Promise<ProviderSummary>;
     removeProvider: (providerId: number) => Promise<boolean>;
   };

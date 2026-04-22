@@ -2,6 +2,30 @@ import { fireEvent, render, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { toast } from "sonner";
 import { CliManagerClaudeTab } from "../ClaudeTab";
+import type {
+  ClaudeCliInfo,
+  ClaudeSettingsState,
+} from "../../../../services/cli/cliManager";
+
+type ClaudeInfoOverride = Omit<
+  Partial<ClaudeCliInfo>,
+  "resolved_via" | "config_dir" | "settings_path"
+> & {
+  resolved_via?: string | null;
+  config_dir?: string | null;
+  settings_path?: string | null;
+};
+
+type ClaudeSettingsOverride = Omit<
+  Partial<ClaudeSettingsState>,
+  "config_dir" | "settings_path" | "permissions_allow" | "permissions_ask" | "permissions_deny"
+> & {
+  config_dir?: string | null;
+  settings_path?: string | null;
+  permissions_allow?: string[] | null;
+  permissions_ask?: string[] | null;
+  permissions_deny?: string[] | null;
+};
 
 vi.mock("sonner", () => ({
   toast: Object.assign(vi.fn(), { success: vi.fn(), error: vi.fn() }),
@@ -15,7 +39,7 @@ vi.mock("../ClaudeOAuthCard", () => ({
   ClaudeOAuthCard: () => <div>claude-oauth-card</div>,
 }));
 
-function createClaudeInfo(overrides: Partial<any> = {}) {
+function createClaudeInfo(overrides: ClaudeInfoOverride = {}): ClaudeCliInfo {
   return {
     found: true,
     version: "0.0.0",
@@ -28,10 +52,12 @@ function createClaudeInfo(overrides: Partial<any> = {}) {
     disable_error_reporting: false,
     error: null,
     ...overrides,
-  };
+  } as ClaudeCliInfo;
 }
 
-function createClaudeSettings(overrides: Partial<any> = {}) {
+function createClaudeSettings(
+  overrides: ClaudeSettingsOverride = {}
+): ClaudeSettingsState {
   return {
     exists: true,
     config_dir: "/home/user/.claude",
@@ -66,7 +92,7 @@ function createClaudeSettings(overrides: Partial<any> = {}) {
     env_claude_code_proxy_resolves_hosts: false,
     env_claude_code_skip_prompt_history: false,
     ...overrides,
-  };
+  } as ClaudeSettingsState;
 }
 
 describe("components/cli-manager/tabs/ClaudeTab", () => {

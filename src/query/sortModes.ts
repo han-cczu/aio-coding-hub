@@ -105,14 +105,7 @@ export function useSortModeActiveSetMutation() {
 
       return { previous };
     },
-    onSuccess: (res, _input, ctx) => {
-      if (!res) {
-        if (ctx?.previous) {
-          queryClient.setQueryData(sortModesKeys.activeList(), ctx.previous);
-        }
-        return;
-      }
-
+    onSuccess: (res) => {
       queryClient.setQueryData<SortModeActiveRow[] | null>(sortModesKeys.activeList(), (prev) => {
         if (!prev) return prev;
         return prev.map((row) => (row.cli_key === res.cli_key ? res : row));

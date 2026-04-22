@@ -41,10 +41,6 @@ export async function runProviderEditorSave(ctx: SaveActionContext) {
   ctx.setSaving(true);
   try {
     const saved = await ctx.persistProvider(built.value.payload);
-    if (!saved) {
-      return;
-    }
-
     ctx.form.setValue("api_key", "", { shouldDirty: false, shouldValidate: false });
     logToConsole("info", ctx.mode === "create" ? "保存 Provider" : "更新 Provider", {
       cli: saved.cli_key,

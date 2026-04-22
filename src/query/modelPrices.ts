@@ -31,7 +31,6 @@ export function useModelPricesTotalCountQuery(options?: { enabled?: boolean }) {
         modelPricesList("claude"),
         modelPricesList("gemini"),
       ]);
-      if (!codex || !claude || !gemini) return null;
       return codex.length + claude.length + gemini.length;
     },
     enabled: options?.enabled ?? true,
@@ -54,7 +53,6 @@ export function useModelPriceAliasesSetMutation() {
   return useMutation({
     mutationFn: (aliases: ModelPriceAliases) => modelPriceAliasesSet(aliases),
     onSuccess: (updated) => {
-      if (!updated) return;
       queryClient.setQueryData<ModelPriceAliases | null>(modelPricesKeys.aliases(), updated);
     },
     onSettled: () => {
@@ -68,8 +66,7 @@ export function useModelPricesSyncBasellmMutation() {
 
   return useMutation({
     mutationFn: (input: { force: boolean }) => modelPricesSyncBasellm(input.force),
-    onSuccess: (report) => {
-      if (!report) return;
+    onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: modelPricesKeys.all });
     },
   });

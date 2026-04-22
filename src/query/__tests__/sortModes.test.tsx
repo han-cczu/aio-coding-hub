@@ -1,6 +1,10 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { SortModeActiveRow } from "../../services/providers/sortModes";
+import type {
+  SortModeActiveRow,
+  SortModeProviderRow,
+  SortModeSummary,
+} from "../../services/providers/sortModes";
 import {
   sortModeActiveList,
   sortModeActiveSet,
@@ -47,6 +51,26 @@ vi.mock("../../services/providers/sortModes", async () => {
   };
 });
 
+function makeSortModeSummary(overrides: Partial<SortModeSummary> = {}): SortModeSummary {
+  return {
+    id: 1,
+    name: "Work",
+    created_at: 0,
+    updated_at: 0,
+    ...overrides,
+  };
+}
+
+function makeSortModeProviderRow(
+  overrides: Partial<SortModeProviderRow> = {}
+): SortModeProviderRow {
+  return {
+    provider_id: 101,
+    enabled: true,
+    ...overrides,
+  };
+}
+
 describe("query/sortModes", () => {
   it("calls sortModesList and sortModeActiveList with tauri runtime", async () => {
     setTauriRuntime();
@@ -69,9 +93,7 @@ describe("query/sortModes", () => {
   it("calls sortModeProvidersList with tauri runtime", async () => {
     setTauriRuntime();
 
-    vi.mocked(sortModeProvidersList).mockResolvedValue([
-      { provider_id: 101, enabled: true },
-    ] as any);
+    vi.mocked(sortModeProvidersList).mockResolvedValue([makeSortModeProviderRow()]);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
@@ -135,43 +157,6 @@ describe("query/sortModes", () => {
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: sortModesKeys.activeList() });
   });
 
-  it("rolls back when sortModeActiveSet returns null", async () => {
-    setTauriRuntime();
-
-    const previous: SortModeActiveRow[] = [{ cli_key: "claude", mode_id: 1, updated_at: 0 }];
-
-    vi.mocked(sortModeActiveSet).mockResolvedValue(null as never);
-
-    const client = createTestQueryClient();
-    client.setQueryData(sortModesKeys.activeList(), previous);
-    const wrapper = createQueryWrapper(client);
-
-    const { result } = renderHook(() => useSortModeActiveSetMutation(), { wrapper });
-    await act(async () => {
-      await result.current.mutateAsync({ cliKey: "claude", modeId: 2 });
-    });
-
-    expect(client.getQueryData(sortModesKeys.activeList())).toEqual(previous);
-  });
-
-  it("invalidates even when service returns null and cache is missing", async () => {
-    setTauriRuntime();
-
-    vi.mocked(sortModeActiveSet).mockResolvedValue(null as never);
-
-    const client = createTestQueryClient();
-    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
-    const wrapper = createQueryWrapper(client);
-
-    const { result } = renderHook(() => useSortModeActiveSetMutation(), { wrapper });
-    await act(async () => {
-      await result.current.mutateAsync({ cliKey: "claude", modeId: 2 });
-    });
-
-    expect(client.getQueryData(sortModesKeys.activeList())).toBeUndefined();
-    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: sortModesKeys.activeList() });
-  });
-
   it("rolls back when sortModeActiveSet throws", async () => {
     setTauriRuntime();
 
@@ -217,12 +202,7 @@ describe("query/sortModes", () => {
   it("useSortModeCreateMutation invalidates list on settle", async () => {
     setTauriRuntime();
 
-    vi.mocked(sortModeCreate).mockResolvedValue({
-      id: 1,
-      name: "Work",
-      created_at: 0,
-      updated_at: 0,
-    } as any);
+    vi.mocked(sortModeCreate).mockResolvedValue(makeSortModeSummary());
 
     const client = createTestQueryClient();
     const invalidateSpy = vi.spyOn(client, "invalidateQueries");
@@ -241,12 +221,7 @@ describe("query/sortModes", () => {
   it("useSortModeRenameMutation invalidates list on settle", async () => {
     setTauriRuntime();
 
-    vi.mocked(sortModeRename).mockResolvedValue({
-      id: 2,
-      name: "Life",
-      created_at: 0,
-      updated_at: 0,
-    } as any);
+    vi.mocked(sortModeRename).mockResolvedValue(makeSortModeSummary({ id: 2, name: "Life" }));
 
     const client = createTestQueryClient();
     const invalidateSpy = vi.spyOn(client, "invalidateQueries");
@@ -265,7 +240,7 @@ describe("query/sortModes", () => {
   it("useSortModeDeleteMutation invalidates list and activeList on settle", async () => {
     setTauriRuntime();
 
-    vi.mocked(sortModeDelete).mockResolvedValue(true as any);
+    vi.mocked(sortModeDelete).mockResolvedValue(true);
 
     const client = createTestQueryClient();
     const invalidateSpy = vi.spyOn(client, "invalidateQueries");
@@ -284,9 +259,7 @@ describe("query/sortModes", () => {
   it("useSortModeProvidersSetOrderMutation invalidates the provider list on settle", async () => {
     setTauriRuntime();
 
-    vi.mocked(sortModeProvidersSetOrder).mockResolvedValue([
-      { provider_id: 101, enabled: true },
-    ] as any);
+    vi.mocked(sortModeProvidersSetOrder).mockResolvedValue([makeSortModeProviderRow()]);
 
     const client = createTestQueryClient();
     const invalidateSpy = vi.spyOn(client, "invalidateQueries");
@@ -314,10 +287,9 @@ describe("query/sortModes", () => {
   it("useSortModeProviderSetEnabledMutation invalidates the provider list on settle", async () => {
     setTauriRuntime();
 
-    vi.mocked(sortModeProviderSetEnabled).mockResolvedValue({
-      provider_id: 101,
-      enabled: false,
-    } as any);
+    vi.mocked(sortModeProviderSetEnabled).mockResolvedValue(
+      makeSortModeProviderRow({ enabled: false })
+    );
 
     const client = createTestQueryClient();
     const invalidateSpy = vi.spyOn(client, "invalidateQueries");

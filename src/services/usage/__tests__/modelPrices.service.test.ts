@@ -2,6 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { commands } from "../../../generated/bindings";
 import { logToConsole } from "../../consoleLog";
 import {
+  type ModelPriceAliases,
+  type ModelPriceSummary,
+  type ModelPricesSyncReport,
   modelPriceAliasesGet,
   modelPriceAliasesSet,
   modelPricesList,
@@ -36,6 +39,51 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+function makeModelPriceSummary(
+  overrides: Partial<ModelPriceSummary> = {}
+): ModelPriceSummary {
+  return {
+    id: 1,
+    cli_key: "claude",
+    model: "claude-3-7-sonnet",
+    currency: "USD",
+    created_at: 1,
+    updated_at: 2,
+    ...overrides,
+  };
+}
+
+function makeModelPriceAliases(
+  overrides: Partial<ModelPriceAliases> = {}
+): ModelPriceAliases {
+  return {
+    version: 1,
+    rules: [
+      {
+        cli_key: "codex",
+        match_type: "prefix",
+        pattern: "gpt-",
+        target_model: "gpt-5",
+        enabled: true,
+      },
+    ],
+    ...overrides,
+  };
+}
+
+function makeModelPricesSyncReport(
+  overrides: Partial<ModelPricesSyncReport> = {}
+): ModelPricesSyncReport {
+  return {
+    status: "updated",
+    inserted: 1,
+    updated: 0,
+    skipped: 0,
+    total: 1,
+    ...overrides,
+  };
+}
+
 describe("services/usage/modelPrices", () => {
   it("rethrows invoke errors and logs", async () => {
     vi.mocked(commands.modelPricesList).mockRejectedValueOnce(new Error("model prices boom"));
@@ -54,51 +102,20 @@ describe("services/usage/modelPrices", () => {
   it("maps generated list and alias payloads through generated authority", async () => {
     vi.mocked(commands.modelPricesList).mockResolvedValueOnce({
       status: "ok",
-      data: [
-        {
-          id: 1,
-          cli_key: "claude",
-          model: "claude-3-7-sonnet",
-          currency: "USD",
-          created_at: 1,
-          updated_at: 2,
-        },
-      ],
-    } as any);
+      data: [makeModelPriceSummary()],
+    });
     vi.mocked(commands.modelPriceAliasesGet).mockResolvedValueOnce({
       status: "ok",
-      data: {
-        version: 1,
-        rules: [
-          {
-            cli_key: "codex",
-            match_type: "prefix",
-            pattern: "gpt-",
-            target_model: "gpt-5",
-            enabled: true,
-          },
-        ],
-      },
-    } as any);
+      data: makeModelPriceAliases(),
+    });
     vi.mocked(commands.modelPriceAliasesSet).mockResolvedValueOnce({
       status: "ok",
-      data: {
-        version: 2,
-        rules: [
-          {
-            cli_key: "codex",
-            match_type: "prefix",
-            pattern: "gpt-",
-            target_model: "gpt-5",
-            enabled: true,
-          },
-        ],
-      },
-    } as any);
+      data: makeModelPriceAliases({ version: 2 }),
+    });
     vi.mocked(commands.modelPricesSyncBasellm).mockResolvedValueOnce({
       status: "ok",
-      data: { status: "updated", inserted: 1, updated: 0, skipped: 0, total: 1 },
-    } as any);
+      data: makeModelPricesSyncReport(),
+    });
 
     const rows = await modelPricesList("claude");
     const aliases = await modelPriceAliasesGet();

@@ -1,5 +1,5 @@
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   costBreakdownModelV1,
   costBreakdownProviderV1,
@@ -28,6 +28,10 @@ vi.mock("../../services/usage/cost", async () => {
 });
 
 describe("query/cost", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   it("aggregates cost analytics when all services return data", async () => {
     setTauriRuntime();
 
@@ -153,20 +157,13 @@ describe("query/cost", () => {
     });
   });
 
-  it("returns null when any underlying call returns null", async () => {
+  it("does not call cost services when disabled", async () => {
     setTauriRuntime();
-
-    vi.mocked(costSummaryV1).mockResolvedValue(null as never);
-    vi.mocked(costTrendV1).mockResolvedValue([]);
-    vi.mocked(costBreakdownProviderV1).mockResolvedValue([]);
-    vi.mocked(costBreakdownModelV1).mockResolvedValue([]);
-    vi.mocked(costScatterCliProviderModelV1).mockResolvedValue([]);
-    vi.mocked(costTopRequestsV1).mockResolvedValue([]);
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
 
-    const { result } = renderHook(
+    renderHook(
       () =>
         useCostAnalyticsV1Query("daily", {
           startTs: null,
@@ -174,14 +171,15 @@ describe("query/cost", () => {
           cliKey: "claude",
           providerId: null,
           model: null,
-        }),
+        }, { enabled: false }),
       { wrapper }
     );
 
-    await waitFor(() => {
-      expect(result.current.isFetched).toBe(true);
-    });
-
-    expect(result.current.data).toBeNull();
+    expect(costSummaryV1).not.toHaveBeenCalled();
+    expect(costTrendV1).not.toHaveBeenCalled();
+    expect(costBreakdownProviderV1).not.toHaveBeenCalled();
+    expect(costBreakdownModelV1).not.toHaveBeenCalled();
+    expect(costScatterCliProviderModelV1).not.toHaveBeenCalled();
+    expect(costTopRequestsV1).not.toHaveBeenCalled();
   });
 });

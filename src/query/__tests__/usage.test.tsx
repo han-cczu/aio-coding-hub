@@ -1,5 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { UsageSummary } from "../../services/usage/usage";
 import {
   usageHourlySeries,
   usageLeaderboardV2,
@@ -30,6 +31,28 @@ vi.mock("../../services/usage/usage", async () => {
     usageProviderCacheRateTrendV1: vi.fn(),
   };
 });
+
+function makeUsageSummary(overrides: Partial<UsageSummary> = {}): UsageSummary {
+  return {
+    requests_total: 0,
+    requests_with_usage: 0,
+    requests_success: 0,
+    requests_failed: 0,
+    cost_covered_success: 0,
+    avg_duration_ms: null,
+    avg_ttfb_ms: null,
+    avg_output_tokens_per_second: null,
+    input_tokens: 0,
+    output_tokens: 0,
+    io_total_tokens: 0,
+    total_tokens: 0,
+    cache_read_input_tokens: 0,
+    cache_creation_input_tokens: 0,
+    cache_creation_5m_input_tokens: 0,
+    cache_creation_1h_input_tokens: 0,
+    ...overrides,
+  };
+}
 
 describe("query/usage", () => {
   it("calls usageHourlySeries with tauri runtime", async () => {
@@ -77,7 +100,7 @@ describe("query/usage", () => {
   it("calls usageSummary with tauri runtime and respects options.enabled + refetchIntervalMs branches", async () => {
     setTauriRuntime();
 
-    vi.mocked(usageSummary).mockResolvedValue(null as never);
+    vi.mocked(usageSummary).mockResolvedValue(makeUsageSummary());
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);
@@ -112,7 +135,7 @@ describe("query/usage", () => {
   it("calls usageSummaryV2 with tauri runtime", async () => {
     setTauriRuntime();
 
-    vi.mocked(usageSummaryV2).mockResolvedValue(null as never);
+    vi.mocked(usageSummaryV2).mockResolvedValue(makeUsageSummary());
 
     const client = createTestQueryClient();
     const wrapper = createQueryWrapper(client);

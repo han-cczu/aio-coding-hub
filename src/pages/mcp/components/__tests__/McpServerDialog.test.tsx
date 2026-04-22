@@ -1,8 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { McpServerDialog } from "../McpServerDialog";
 import { useMcpServerUpsertMutation } from "../../../../query/mcp";
 import { mcpParseJson } from "../../../../services/workspace/mcp";
+import {
+  type McpImportServer,
+  type McpParseResult,
+  type McpServerSummary,
+} from "../../../../services/workspace/mcp";
+import { McpServerDialog } from "../McpServerDialog";
 
 vi.mock("sonner", () => ({ toast: vi.fn() }));
 vi.mock("../../../../services/consoleLog", () => ({ logToConsole: vi.fn() }));
@@ -20,12 +25,78 @@ vi.mock("../../../../services/workspace/mcp", async () => {
   return { ...actual, mcpParseJson: vi.fn() };
 });
 
+type UpsertMutationMock = Pick<
+  ReturnType<typeof useMcpServerUpsertMutation>,
+  "isPending" | "mutateAsync"
+>;
+
+function createUpsertMutation(
+  overrides: Partial<UpsertMutationMock> = {}
+): UpsertMutationMock {
+  return {
+    isPending: false,
+    mutateAsync: vi.fn(),
+    ...overrides,
+  };
+}
+
+function mockUpsertMutation(mutation: UpsertMutationMock) {
+  vi.mocked(useMcpServerUpsertMutation).mockReturnValue(
+    mutation as ReturnType<typeof useMcpServerUpsertMutation>
+  );
+}
+
+function makeMcpServerSummary(
+  overrides: Partial<McpServerSummary> = {}
+): McpServerSummary {
+  return {
+    id: 1,
+    server_key: "fetch",
+    name: "Fetch",
+    transport: "stdio",
+    command: "uvx",
+    args: ["mcp-server-fetch"],
+    env_keys: [],
+    cwd: null,
+    url: null,
+    header_keys: [],
+    enabled: true,
+    created_at: 1,
+    updated_at: 1,
+    ...overrides,
+  };
+}
+
+function makeMcpImportServer(
+  overrides: Partial<McpImportServer> = {}
+): McpImportServer {
+  return {
+    server_key: "fetch",
+    name: "Fetch",
+    transport: "stdio",
+    command: "uvx",
+    args: ["mcp-server-fetch"],
+    env: { FOO: "bar" },
+    cwd: null,
+    url: null,
+    headers: {},
+    enabled: true,
+    ...overrides,
+  };
+}
+
+function makeMcpParseResult(
+  overrides: Partial<McpParseResult> = {}
+): McpParseResult {
+  return {
+    servers: [makeMcpImportServer()],
+    ...overrides,
+  };
+}
+
 describe("pages/mcp/components/McpServerDialog", () => {
   it("renders saving state and disables submit", () => {
-    vi.mocked(useMcpServerUpsertMutation).mockReturnValue({
-      isPending: true,
-      mutateAsync: vi.fn(),
-    } as any);
+    mockUpsertMutation(createUpsertMutation({ isPending: true }));
 
     render(
       <McpServerDialog workspaceId={1} open={true} editTarget={null} onOpenChange={vi.fn()} />
@@ -36,7 +107,7 @@ describe("pages/mcp/components/McpServerDialog", () => {
 
   it("validates env and can save stdio servers", async () => {
     const mutateAsync = vi.fn();
-    vi.mocked(useMcpServerUpsertMutation).mockReturnValue({ isPending: false, mutateAsync } as any);
+    mockUpsertMutation(createUpsertMutation({ mutateAsync }));
 
     const onOpenChange = vi.fn();
 
@@ -59,8 +130,7 @@ describe("pages/mcp/components/McpServerDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存并同步" }));
     await waitFor(() => expect(mutateAsync).not.toHaveBeenCalled());
 
-    // Valid env: mutation runs but returns null => "Tauri only" path.
-    mutateAsync.mockResolvedValueOnce(null);
+    // Valid env: mutation runs and returns the updated summary.
     fireEvent.change(screen.getByPlaceholderText("KEY（例如 TOKEN）"), {
       target: { value: "FOO" },
     });
@@ -68,6 +138,15 @@ describe("pages/mcp/components/McpServerDialog", () => {
       target: { value: "bar" },
     });
     fireEvent.change(screen.getByPlaceholderText(/-y/), { target: { value: "-y\n@foo/bar" } });
+    mutateAsync.mockResolvedValueOnce(
+      makeMcpServerSummary({
+        id: 1,
+        server_key: "fetch",
+        transport: "stdio",
+        command: "node",
+        args: ["-y", "@foo/bar"],
+      })
+    );
     fireEvent.click(screen.getByRole("button", { name: "保存并同步" }));
     await waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith(
@@ -91,15 +170,12 @@ describe("pages/mcp/components/McpServerDialog", () => {
         })
       )
     );
-
-    mutateAsync.mockResolvedValueOnce({ id: 1, server_key: "fetch", transport: "stdio" });
-    fireEvent.click(screen.getByRole("button", { name: "保存并同步" }));
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
   it("blocks invalid env keys in pair editor", async () => {
     const mutateAsync = vi.fn();
-    vi.mocked(useMcpServerUpsertMutation).mockReturnValue({ isPending: false, mutateAsync } as any);
+    mockUpsertMutation(createUpsertMutation({ mutateAsync }));
 
     render(
       <McpServerDialog workspaceId={1} open={true} editTarget={null} onOpenChange={vi.fn()} />
@@ -124,8 +200,17 @@ describe("pages/mcp/components/McpServerDialog", () => {
   it("saves stdio server with blank env row and cwd", async () => {
     const mutateAsync = vi
       .fn()
-      .mockResolvedValueOnce({ id: 1, server_key: "demo", transport: "stdio" });
-    vi.mocked(useMcpServerUpsertMutation).mockReturnValue({ isPending: false, mutateAsync } as any);
+      .mockResolvedValueOnce(
+        makeMcpServerSummary({
+          id: 1,
+          server_key: "demo",
+          name: "Demo",
+          transport: "stdio",
+          command: "node",
+          cwd: "/tmp",
+        })
+      );
+    mockUpsertMutation(createUpsertMutation({ mutateAsync }));
 
     const onOpenChange = vi.fn();
     render(
@@ -173,7 +258,7 @@ describe("pages/mcp/components/McpServerDialog", () => {
 
   it("prefills and saves http servers with headers parsing", async () => {
     const mutateAsync = vi.fn();
-    vi.mocked(useMcpServerUpsertMutation).mockReturnValue({ isPending: false, mutateAsync } as any);
+    mockUpsertMutation(createUpsertMutation({ mutateAsync }));
 
     const onOpenChange = vi.fn();
 
@@ -182,15 +267,16 @@ describe("pages/mcp/components/McpServerDialog", () => {
         workspaceId={1}
         open={true}
         editTarget={
-          {
+          makeMcpServerSummary({
             id: 7,
             server_key: "remote",
             name: "Remote",
             transport: "http",
+            command: null,
+            args: [],
             url: "https://example.com/mcp",
-            headers: { Authorization: "Bearer x" },
-            enabled: true,
-          } as any
+            header_keys: ["Authorization"],
+          })
         }
         onOpenChange={onOpenChange}
       />
@@ -209,13 +295,24 @@ describe("pages/mcp/components/McpServerDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存并同步" }));
     await waitFor(() => expect(mutateAsync).not.toHaveBeenCalled());
 
-    mutateAsync.mockResolvedValueOnce({ id: 7, server_key: "remote", transport: "http" });
     fireEvent.change(screen.getByPlaceholderText("Header（例如 Authorization）"), {
       target: { value: "Authorization" },
     });
     fireEvent.change(screen.getByPlaceholderText("Value（例如 Bearer xxx）"), {
       target: { value: "Bearer y" },
     });
+    mutateAsync.mockResolvedValueOnce(
+      makeMcpServerSummary({
+        id: 7,
+        server_key: "remote",
+        name: "Remote",
+        transport: "http",
+        command: null,
+        args: [],
+        url: "https://example.com/mcp",
+        header_keys: ["Authorization"],
+      })
+    );
     fireEvent.click(screen.getByRole("button", { name: "保存并同步" }));
     await waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith(
@@ -243,11 +340,8 @@ describe("pages/mcp/components/McpServerDialog", () => {
   });
 
   it("fills fields from JSON fallback parser when service returns empty", async () => {
-    vi.mocked(useMcpServerUpsertMutation).mockReturnValue({
-      isPending: false,
-      mutateAsync: vi.fn(),
-    } as any);
-    vi.mocked(mcpParseJson).mockResolvedValueOnce({ servers: [] } as any);
+    mockUpsertMutation(createUpsertMutation());
+    vi.mocked(mcpParseJson).mockResolvedValueOnce(makeMcpParseResult({ servers: [] }));
 
     render(
       <McpServerDialog workspaceId={1} open={true} editTarget={null} onOpenChange={vi.fn()} />
@@ -269,11 +363,8 @@ describe("pages/mcp/components/McpServerDialog", () => {
 
   it("fills fields from mcpServers JSON and preserves sse transport", async () => {
     const mutateAsync = vi.fn();
-    vi.mocked(useMcpServerUpsertMutation).mockReturnValue({
-      isPending: false,
-      mutateAsync,
-    } as any);
-    vi.mocked(mcpParseJson).mockResolvedValueOnce({ servers: [] } as any);
+    mockUpsertMutation(createUpsertMutation({ mutateAsync }));
+    vi.mocked(mcpParseJson).mockResolvedValueOnce(makeMcpParseResult({ servers: [] }));
 
     render(
       <McpServerDialog workspaceId={1} open={true} editTarget={null} onOpenChange={vi.fn()} />
@@ -292,7 +383,18 @@ describe("pages/mcp/components/McpServerDialog", () => {
     expect(screen.getByDisplayValue("Authorization")).toBeInTheDocument();
     expect(screen.getByDisplayValue("Bearer x")).toBeInTheDocument();
 
-    mutateAsync.mockResolvedValueOnce({ id: 1, server_key: "remote", transport: "sse" });
+    mutateAsync.mockResolvedValueOnce(
+      makeMcpServerSummary({
+        id: 1,
+        server_key: "remote",
+        name: "remote",
+        transport: "sse",
+        command: null,
+        args: [],
+        url: "https://example.com/mcp",
+        header_keys: ["Authorization"],
+      })
+    );
     fireEvent.click(screen.getByRole("button", { name: "保存并同步" }));
     await waitFor(() =>
       expect(mutateAsync).toHaveBeenCalledWith(
@@ -319,11 +421,8 @@ describe("pages/mcp/components/McpServerDialog", () => {
   });
 
   it("fills fields from CLI-style JSON (codex.servers)", async () => {
-    vi.mocked(useMcpServerUpsertMutation).mockReturnValue({
-      isPending: false,
-      mutateAsync: vi.fn(),
-    } as any);
-    vi.mocked(mcpParseJson).mockResolvedValueOnce({ servers: [] } as any);
+    mockUpsertMutation(createUpsertMutation());
+    vi.mocked(mcpParseJson).mockResolvedValueOnce(makeMcpParseResult({ servers: [] }));
 
     render(
       <McpServerDialog workspaceId={1} open={true} editTarget={null} onOpenChange={vi.fn()} />
@@ -345,11 +444,8 @@ describe("pages/mcp/components/McpServerDialog", () => {
   });
 
   it("fills fields from array JSON and infers http from url", async () => {
-    vi.mocked(useMcpServerUpsertMutation).mockReturnValue({
-      isPending: false,
-      mutateAsync: vi.fn(),
-    } as any);
-    vi.mocked(mcpParseJson).mockResolvedValueOnce({ servers: [] } as any);
+    mockUpsertMutation(createUpsertMutation());
+    vi.mocked(mcpParseJson).mockResolvedValueOnce(makeMcpParseResult({ servers: [] }));
 
     render(
       <McpServerDialog workspaceId={1} open={true} editTarget={null} onOpenChange={vi.fn()} />
@@ -371,24 +467,26 @@ describe("pages/mcp/components/McpServerDialog", () => {
 
   it("fills fields from JSON in create mode", async () => {
     const mutateAsync = vi.fn();
-    vi.mocked(useMcpServerUpsertMutation).mockReturnValue({ isPending: false, mutateAsync } as any);
+    mockUpsertMutation(createUpsertMutation({ mutateAsync }));
 
-    vi.mocked(mcpParseJson).mockResolvedValue({
-      servers: [
-        {
-          server_key: "fetch",
-          name: "Fetch",
-          transport: "stdio",
-          command: "uvx",
-          args: ["mcp-server-fetch"],
-          env: { FOO: "bar" },
-          cwd: null,
-          url: null,
-          headers: {},
-          enabled: true,
-        },
-      ],
-    } as any);
+    vi.mocked(mcpParseJson).mockResolvedValue(
+      makeMcpParseResult({
+        servers: [
+          makeMcpImportServer({
+            server_key: "fetch",
+            name: "Fetch",
+            transport: "stdio",
+            command: "uvx",
+            args: ["mcp-server-fetch"],
+            env: { FOO: "bar" },
+            cwd: null,
+            url: null,
+            headers: {},
+            enabled: true,
+          }),
+        ],
+      })
+    );
 
     render(
       <McpServerDialog workspaceId={1} open={true} editTarget={null} onOpenChange={vi.fn()} />

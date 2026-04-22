@@ -11,8 +11,6 @@ export async function startupSyncModelPricesOnce(): Promise<void> {
 
   try {
     const report = await modelPricesSyncBasellm(false);
-    if (!report) return;
-
     setLastModelPricesSync(report);
     logToConsole("info", "启动同步：模型定价同步完成", {
       status: report.status,
@@ -41,8 +39,6 @@ export function startupSyncDefaultPromptsFromFilesOncePerSession(): Promise<void
   defaultPromptsSyncPromise = (async () => {
     try {
       const report = await promptsDefaultSyncFromFiles();
-      if (!report) return;
-
       const summary = summarizeDefaultPromptSyncActions(report.items);
       const hasError = report.items.some((it) => it.action === "error");
 

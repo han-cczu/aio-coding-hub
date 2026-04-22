@@ -74,11 +74,9 @@ export function useProviderSetEnabledMutation() {
 export function useProviderUpsertMutation() {
   const queryClient = useQueryClient();
 
-  return useMutation<ProviderSummary | null, Error, { input: ProviderUpsertInput }>({
+  return useMutation<ProviderSummary, Error, { input: ProviderUpsertInput }>({
     mutationFn: (input: { input: ProviderUpsertInput }) => providerUpsert(input.input),
     onSuccess: (saved) => {
-      if (!saved) return;
-
       queryClient.setQueryData<ProviderSummary[] | null>(
         providersKeys.list(saved.cli_key),
         (prev) => {

@@ -54,8 +54,6 @@ export function useCostAnalyticsV1Query(
         costTopRequestsV1(period, { ...filters, limit: 50 }),
       ]);
 
-      if (!summary || !trend || !providers || !models || !scatter || !top) return null;
-
       return {
         summary,
         trend,

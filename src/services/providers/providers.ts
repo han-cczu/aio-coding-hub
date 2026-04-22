@@ -20,6 +20,7 @@ import {
 import {
   narrowGeneratedStringUnion,
   type NullableGeneratedKeys,
+  type RemapGeneratedKeys,
   type Override,
 } from "../generatedTypeUtils";
 
@@ -49,18 +50,49 @@ export type ProviderSummary = Override<
   }
 >;
 
+const providerUpsertFieldMap = {
+  providerId: "providerId",
+  cliKey: "cliKey",
+  name: "name",
+  baseUrls: "baseUrls",
+  baseUrlMode: "baseUrlMode",
+  authMode: "authMode",
+  apiKey: "apiKey",
+  enabled: "enabled",
+  costMultiplier: "costMultiplier",
+  priority: "priority",
+  claudeModels: "claudeModels",
+  limit5hUsd: "limit5hUsd",
+  limitDailyUsd: "limitDailyUsd",
+  dailyResetMode: "dailyResetMode",
+  dailyResetTime: "dailyResetTime",
+  limitWeeklyUsd: "limitWeeklyUsd",
+  limitMonthlyUsd: "limitMonthlyUsd",
+  limitTotalUsd: "limitTotalUsd",
+  tags: "tags",
+  note: "note",
+  sourceProviderId: "sourceProviderId",
+  bridgeType: "bridgeType",
+  streamIdleTimeoutSeconds: "streamIdleTimeoutSeconds",
+} as const satisfies Record<keyof GeneratedProviderUpsertInput, keyof GeneratedProviderUpsertInput>;
+
+type ProviderUpsertAuthority = RemapGeneratedKeys<
+  GeneratedProviderUpsertInput,
+  typeof providerUpsertFieldMap
+>;
+
 type ProviderUpsertOptionalKeys =
-  | NullableGeneratedKeys<GeneratedProviderUpsertInput>
+  | NullableGeneratedKeys<ProviderUpsertAuthority>
   | "streamIdleTimeoutSeconds";
 
 export type ProviderUpsertInput = Omit<
-  GeneratedProviderUpsertInput,
+  ProviderUpsertAuthority,
   ProviderUpsertOptionalKeys | "cliKey"
 > &
   {
     cliKey: CliKey;
   } & Partial<
-    Pick<GeneratedProviderUpsertInput, ProviderUpsertOptionalKeys>
+    Pick<ProviderUpsertAuthority, ProviderUpsertOptionalKeys>
   >;
 
 type ProviderUpsertTransportInput = Omit<
