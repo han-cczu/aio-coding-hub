@@ -18,7 +18,9 @@ function requestSignalStart(cliKey: string, traceId: string, model?: string | nu
     phase: "start",
     trace_id: traceId,
     cli_key: cliKey,
+    session_id: null,
     requested_model: model,
+    ts: Date.now(),
   } as any;
 }
 
@@ -27,6 +29,9 @@ function requestSignalComplete(cliKey: string, traceId = "t-1") {
     phase: "complete",
     trace_id: traceId,
     cli_key: cliKey,
+    session_id: null,
+    requested_model: null,
+    ts: Date.now(),
   } as any;
 }
 

@@ -62,12 +62,39 @@ describe("hooks/useGatewayQuerySync", () => {
 
     // Usage invalidation only reacts to request completion signals.
     const requestHandler = handlers.get(gatewayEventNames.requestSignal)!;
-    requestHandler({ payload: { phase: "start" } });
+    requestHandler({
+      payload: {
+        phase: "start",
+        trace_id: "t-1",
+        cli_key: "claude",
+        session_id: null,
+        requested_model: null,
+        ts: 1,
+      },
+    });
     vi.advanceTimersByTime(1000);
     expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: usageKeys.all });
 
-    requestHandler({ payload: { phase: "complete" } });
-    requestHandler({ payload: { phase: "complete" } });
+    requestHandler({
+      payload: {
+        phase: "complete",
+        trace_id: "t-1",
+        cli_key: "claude",
+        session_id: null,
+        requested_model: null,
+        ts: 2,
+      },
+    });
+    requestHandler({
+      payload: {
+        phase: "complete",
+        trace_id: "t-1",
+        cli_key: "claude",
+        session_id: null,
+        requested_model: null,
+        ts: 2,
+      },
+    });
     vi.advanceTimersByTime(1000);
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: usageKeys.all });
     expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: providerLimitUsageKeys.all });

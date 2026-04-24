@@ -2,6 +2,7 @@ import { act, renderHook } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { gatewayEventNames } from "../../../../constants/gatewayEvents";
 import { useWindowForeground } from "../../../../hooks/useWindowForeground";
+import { logToConsole } from "../../../../services/consoleLog";
 import { subscribeGatewayEvent } from "../../../../services/gateway/gatewayEventBus";
 import { useHomeFreshnessOwner } from "../useHomeFreshnessOwner";
 
@@ -11,6 +12,10 @@ vi.mock("../../../../hooks/useWindowForeground", () => ({
 
 vi.mock("../../../../services/gateway/gatewayEventBus", () => ({
   subscribeGatewayEvent: vi.fn(),
+}));
+
+vi.mock("../../../../services/consoleLog", () => ({
+  logToConsole: vi.fn(),
 }));
 
 describe("pages/home/hooks/useHomeFreshnessOwner", () => {
@@ -179,5 +184,81 @@ describe("pages/home/hooks/useHomeFreshnessOwner", () => {
 
     expect(refreshRequestLogs).not.toHaveBeenCalled();
     vi.useRealTimers();
+  });
+
+  it("queues manual refresh while another refresh is in-flight", async () => {
+    let resolveRefresh: ((value: unknown) => void) | null = null;
+    const refreshRequestLogs = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveRefresh = resolve;
+          })
+      )
+      .mockResolvedValueOnce(null);
+
+    const { result } = renderHook(() =>
+      useHomeFreshnessOwner({
+        overviewActive: true,
+        foregroundActive: true,
+        onRefreshRequestLogs: refreshRequestLogs,
+      })
+    );
+
+    void result.current.refreshRequestLogsNow();
+    await result.current.refreshRequestLogsNow();
+
+    expect(refreshRequestLogs).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveRefresh?.(null);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(refreshRequestLogs).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns null for manual refresh when inactive and reports subscribe failures", async () => {
+    const refreshRequestLogs = vi.fn().mockResolvedValue(null);
+
+    const inactive = renderHook(() =>
+      useHomeFreshnessOwner({
+        overviewActive: false,
+        foregroundActive: true,
+        onRefreshRequestLogs: refreshRequestLogs,
+      })
+    );
+
+    await expect(inactive.result.current.refreshRequestLogsNow()).resolves.toBeNull();
+    expect(refreshRequestLogs).not.toHaveBeenCalled();
+    inactive.unmount();
+
+    const unsubscribe = vi.fn();
+    vi.mocked(subscribeGatewayEvent).mockReturnValue({
+      ready: Promise.reject(new Error("listen boom")),
+      unsubscribe,
+    });
+
+    renderHook(() =>
+      useHomeFreshnessOwner({
+        overviewActive: true,
+        foregroundActive: true,
+        onRefreshRequestLogs: refreshRequestLogs,
+      })
+    );
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(unsubscribe).toHaveBeenCalled();
+    expect(logToConsole).toHaveBeenCalledWith(
+      "warn",
+      "首页请求记录实时监听初始化失败",
+      expect.objectContaining({ stage: "useHomeFreshnessOwner" })
+    );
   });
 });

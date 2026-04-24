@@ -69,7 +69,11 @@ export function useHomeOverviewFeed({
   });
 
   const refreshRequestLogsFromOwner = useCallback(() => {
-    refreshRequestLogsNow();
+    void refreshRequestLogsNow().then((res) => {
+      if (res && typeof res === "object" && "error" in res && res.error) {
+        toast("读取使用记录失败：请查看控制台日志");
+      }
+    });
   }, [refreshRequestLogsNow]);
 
   useEffect(() => {

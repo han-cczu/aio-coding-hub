@@ -55,7 +55,7 @@ describe("pages/home/hooks/useHomeOverviewFeed", () => {
       refreshRequestLogs: vi.fn().mockResolvedValue({ error: null }),
     } as any);
     vi.mocked(useHomeFreshnessOwner).mockReturnValue({
-      refreshRequestLogsNow: vi.fn(),
+      refreshRequestLogsNow: vi.fn().mockResolvedValue(null),
     });
   });
 
@@ -167,7 +167,7 @@ describe("pages/home/hooks/useHomeOverviewFeed", () => {
   });
 
   it("delegates manual request logs refresh to home freshness owner", () => {
-    const ownerRefresh = vi.fn();
+    const ownerRefresh = vi.fn().mockResolvedValue({ error: null });
     const requestLogsRefresh = vi.fn().mockResolvedValue({ error: null });
 
     vi.mocked(useRequestLogsFeed).mockReturnValue({

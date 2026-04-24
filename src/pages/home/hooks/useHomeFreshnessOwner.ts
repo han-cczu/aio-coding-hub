@@ -50,27 +50,28 @@ export function useHomeFreshnessOwner({
   }, []);
 
   const flushRequestLogs = useCallback(
-    (source: RefreshSource) => {
+    (source: RefreshSource): Promise<unknown> | null => {
       if (!activeRef.current) {
         clearQueuedRefresh();
-        return;
+        return null;
       }
 
       if (inFlightRef.current) {
         queuedRef.current = true;
-        return;
+        return null;
       }
 
       queuedRef.current = false;
       inFlightRef.current = true;
 
-      void onRefreshRequestLogsRef
+      return onRefreshRequestLogsRef
         .current()
         .catch((error) => {
           logToConsole("warn", "首页请求记录刷新失败", {
             source,
             error: String(error),
           });
+          throw error;
         })
         .finally(() => {
           inFlightRef.current = false;
@@ -79,7 +80,7 @@ export function useHomeFreshnessOwner({
             return;
           }
           queuedRef.current = false;
-          flushRequestLogs(source);
+          void flushRequestLogs(source);
         });
     },
     [clearQueuedRefresh]
@@ -98,14 +99,14 @@ export function useHomeFreshnessOwner({
 
       timerRef.current = window.setTimeout(() => {
         timerRef.current = null;
-        flushRequestLogs(source);
+        void flushRequestLogs(source);
       }, refreshWindowMs);
     },
     [flushRequestLogs, refreshWindowMs]
   );
 
   const refreshRequestLogsNow = useCallback(() => {
-    flushRequestLogs("manual");
+    return flushRequestLogs("manual") ?? Promise.resolve(null);
   }, [flushRequestLogs]);
 
   useWindowForeground({

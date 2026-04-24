@@ -12,7 +12,7 @@ describe("services/providers/providers contract", () => {
     expect(providersSource).toContain("type ProviderSummary as GeneratedProviderSummary");
     expect(providersSource).toContain("type ProviderUpsertInput as GeneratedProviderUpsertInput");
     expect(providersSource).toContain("type RemapGeneratedKeys");
-    expect(providersSource).toContain("const providerUpsertFieldMap = {");
+    expect(providersSource).toContain("type ProviderUpsertFieldMap = {");
     expect(providersSource).not.toContain("export type ProviderSummary = {");
     expect(providersSource).not.toContain("export type ProviderUpsertInput = {");
   });

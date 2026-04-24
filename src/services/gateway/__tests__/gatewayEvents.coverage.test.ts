@@ -42,7 +42,7 @@ describe("services/gatewayEvents (coverage)", () => {
       vi.mocked(tauriListen).mock.calls.find((call) => call[0] === eventName)?.[1];
 
     handlerFor("gateway:request_start")?.({
-      payload: { trace_id: "t1", cli_key: "claude", method: null, path: null, query: null, ts: 0 },
+      payload: { trace_id: "t1", cli_key: "claude", method: "POST", path: "/", query: null, ts: 0 },
     } as any);
 
     expect(logToConsole).not.toHaveBeenCalled();
