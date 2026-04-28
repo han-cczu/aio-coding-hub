@@ -74,8 +74,10 @@ impl RecentErrorCache {
         self.errors.insert(fingerprint_key, entry);
     }
 
-    pub(in crate::gateway) fn clear(&mut self) {
+    pub(in crate::gateway) fn clear(&mut self) -> usize {
+        let count = self.errors.len();
         self.errors.clear();
+        count
     }
 
     fn prune_expired(&mut self, now_unix: i64) {

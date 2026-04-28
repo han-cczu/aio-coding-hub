@@ -1,7 +1,7 @@
 //! Usage: Provider sort modes related Tauri commands.
 
 use crate::app_state::{ensure_db_ready, DbInitState};
-use crate::gateway_control::app_gateway_clear_cli_session_bindings;
+use crate::gateway_control::app_gateway_clear_cli_route_runtime_state;
 use crate::{blocking, sort_modes};
 
 #[tauri::command]
@@ -95,7 +95,7 @@ pub(crate) async fn sort_mode_active_set(
     })
     .await?;
 
-    app_gateway_clear_cli_session_bindings(&app, &cli_key);
+    app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
 
     Ok(row)
 }
@@ -134,7 +134,7 @@ pub(crate) async fn sort_mode_providers_set_order(
     .map_err(Into::into);
 
     if result.is_ok() {
-        app_gateway_clear_cli_session_bindings(&app, &cli_key);
+        app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
     }
 
     result
@@ -159,7 +159,7 @@ pub(crate) async fn sort_mode_provider_set_enabled(
     .map_err(Into::into);
 
     if result.is_ok() {
-        app_gateway_clear_cli_session_bindings(&app, &cli_key);
+        app_gateway_clear_cli_route_runtime_state(&app, &cli_key);
     }
 
     result

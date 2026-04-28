@@ -1,5 +1,5 @@
 use crate::app_state::{ensure_db_ready, DbInitState};
-use crate::gateway_control::app_gateway_clear_cli_session_bindings;
+use crate::gateway_control::app_gateway_clear_cli_route_runtime_state;
 use crate::{blocking, providers};
 
 #[derive(serde::Deserialize, specta::Type)]
@@ -34,7 +34,7 @@ pub(crate) struct ProviderUpsertInput {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 struct ProviderRuntimeResetDecision {
-    clear_session_bindings: bool,
+    clear_route_runtime_state: bool,
 }
 
 fn normalize_provider_name(name: &str) -> String {
@@ -89,7 +89,9 @@ fn provider_runtime_reset_decision(
     submitted_api_key: Option<&str>,
 ) -> ProviderRuntimeResetDecision {
     let Some(previous) = previous else {
-        return ProviderRuntimeResetDecision::default();
+        return ProviderRuntimeResetDecision {
+            clear_route_runtime_state: next.enabled,
+        };
     };
 
     let sensitive_config_changed = previous.base_urls != next.base_urls
@@ -101,7 +103,7 @@ fn provider_runtime_reset_decision(
         || previous.bridge_type != next.bridge_type;
 
     ProviderRuntimeResetDecision {
-        clear_session_bindings: sensitive_config_changed,
+        clear_route_runtime_state: sensitive_config_changed,
     }
 }
 
@@ -225,13 +227,14 @@ pub(crate) async fn provider_upsert(
             );
         }
 
-        if decision.clear_session_bindings {
-            let cleared_sessions = app_gateway_clear_cli_session_bindings(&app, &provider.cli_key);
+        if decision.clear_route_runtime_state {
+            let cleared = app_gateway_clear_cli_route_runtime_state(&app, &provider.cli_key);
             tracing::info!(
                 provider_id = provider.id,
                 cli_key = %provider.cli_key,
-                cleared_sessions,
-                "provider runtime bindings cleared after sensitive update"
+                cleared_sessions = cleared.cleared_sessions,
+                cleared_recent_errors = cleared.cleared_recent_errors,
+                "provider route runtime state cleared after provider save"
             );
         }
     }
@@ -291,6 +294,17 @@ pub(crate) async fn provider_duplicate(
     .map_err(Into::into);
 
     if let Ok(ref provider) = result {
+        if provider.enabled {
+            let cleared = app_gateway_clear_cli_route_runtime_state(&app, &provider.cli_key);
+            tracing::info!(
+                provider_id = provider.id,
+                cli_key = %provider.cli_key,
+                cleared_sessions = cleared.cleared_sessions,
+                cleared_recent_errors = cleared.cleared_recent_errors,
+                "provider route runtime state cleared after duplicate"
+            );
+        }
+
         tracing::info!(
             provider_id = provider.id,
             cli_key = %provider.cli_key,
@@ -316,11 +330,12 @@ pub(crate) async fn provider_set_enabled(
     .map_err(Into::into);
 
     if let Ok(ref provider) = result {
-        let cleared_sessions = app_gateway_clear_cli_session_bindings(&app, &provider.cli_key);
+        let cleared = app_gateway_clear_cli_route_runtime_state(&app, &provider.cli_key);
         tracing::info!(
             provider_id = provider.id,
             enabled = provider.enabled,
-            cleared_sessions,
+            cleared_sessions = cleared.cleared_sessions,
+            cleared_recent_errors = cleared.cleared_recent_errors,
             "provider enabled state changed"
         );
     }
@@ -336,19 +351,29 @@ pub(crate) async fn provider_delete(
     let db = ensure_db_ready(app.clone(), db_state.inner()).await?;
     let result = blocking::run(
         "provider_delete",
-        move || -> crate::shared::error::AppResult<bool> {
+        move || -> crate::shared::error::AppResult<(bool, String)> {
+            let cli_key = providers::cli_key_by_id(&db, provider_id)?.ok_or_else(|| {
+                crate::shared::error::AppError::from("DB_NOT_FOUND: provider not found")
+            })?;
             providers::delete(&db, provider_id)?;
-            Ok(true)
+            Ok((true, cli_key))
         },
     )
     .await
     .map_err(Into::into);
 
-    if let Ok(true) = result {
-        tracing::info!(provider_id = provider_id, "provider deleted");
+    if let Ok((true, ref cli_key)) = result {
+        let cleared = app_gateway_clear_cli_route_runtime_state(&app, cli_key);
+        tracing::info!(
+            provider_id = provider_id,
+            cli_key = %cli_key,
+            cleared_sessions = cleared.cleared_sessions,
+            cleared_recent_errors = cleared.cleared_recent_errors,
+            "provider deleted"
+        );
     }
 
-    result
+    result.map(|(deleted, _)| deleted)
 }
 
 pub(crate) async fn providers_reorder(
@@ -367,11 +392,12 @@ pub(crate) async fn providers_reorder(
 
     if let Ok(ref providers) = result {
         // Provider order changes must invalidate session-bound provider_order (default TTL=300s).
-        let cleared = app_gateway_clear_cli_session_bindings(&app, &cli_key_for_log);
+        let cleared = app_gateway_clear_cli_route_runtime_state(&app, &cli_key_for_log);
         tracing::info!(
             cli_key = %cli_key_for_log,
             count = providers.len(),
-            cleared_sessions = cleared,
+            cleared_sessions = cleared.cleared_sessions,
+            cleared_recent_errors = cleared.cleared_recent_errors,
             "providers reordered"
         );
     }
@@ -449,7 +475,7 @@ mod tests {
     }
 
     #[test]
-    fn provider_runtime_reset_decision_ignores_create_and_non_sensitive_edits() {
+    fn provider_runtime_reset_decision_handles_create_and_non_sensitive_edits() {
         let next = providers::ProviderSummary {
             id: 1,
             cli_key: "claude".to_string(),
@@ -484,6 +510,15 @@ mod tests {
 
         assert_eq!(
             provider_runtime_reset_decision(None, None, &next, None),
+            ProviderRuntimeResetDecision {
+                clear_route_runtime_state: true,
+            }
+        );
+
+        let mut disabled_create = next.clone();
+        disabled_create.enabled = false;
+        assert_eq!(
+            provider_runtime_reset_decision(None, None, &disabled_create, None),
             ProviderRuntimeResetDecision::default()
         );
 
@@ -518,7 +553,7 @@ mod tests {
         assert_eq!(
             provider_runtime_reset_decision(Some(&next), Some("sk-existing"), &disabled, None),
             ProviderRuntimeResetDecision {
-                clear_session_bindings: true,
+                clear_route_runtime_state: true,
             }
         );
     }
@@ -563,7 +598,7 @@ mod tests {
         assert_eq!(
             provider_runtime_reset_decision(Some(&previous), Some("sk-old"), &next, None),
             ProviderRuntimeResetDecision {
-                clear_session_bindings: true,
+                clear_route_runtime_state: true,
             }
         );
 
@@ -578,7 +613,7 @@ mod tests {
                 Some("sk-new")
             ),
             ProviderRuntimeResetDecision {
-                clear_session_bindings: true,
+                clear_route_runtime_state: true,
             }
         );
     }

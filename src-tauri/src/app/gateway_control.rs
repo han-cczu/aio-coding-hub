@@ -90,14 +90,14 @@ pub(crate) fn app_ensure_gateway_running(
     }
 }
 
-pub(crate) fn app_gateway_clear_cli_session_bindings<R: tauri::Runtime>(
+pub(crate) fn app_gateway_clear_cli_route_runtime_state<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     cli_key: &str,
-) -> usize {
+) -> crate::gateway::runtime::GatewayRouteRuntimeClearResult {
     super::gateway_state::with_app_running_gateway(app, |running| {
         running
-            .map(|runtime| runtime.clear_cli_session_bindings(cli_key))
-            .unwrap_or(0)
+            .map(|runtime| runtime.clear_cli_route_runtime_state(cli_key))
+            .unwrap_or_default()
     })
 }
 

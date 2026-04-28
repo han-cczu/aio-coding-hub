@@ -149,6 +149,60 @@ mod tests {
         );
     }
 
+    #[test]
+    fn clear_cli_route_runtime_state_clears_sessions_and_recent_error_cache() {
+        let rt = tokio::runtime::Runtime::new().expect("runtime");
+        let session = Arc::new(crate::session_manager::SessionManager::new());
+        let recent_errors = Arc::new(Mutex::new(
+            crate::gateway::proxy::RecentErrorCache::default(),
+        ));
+        let now_unix = 100;
+
+        session.bind_sort_mode(
+            "codex",
+            "session_a",
+            Some(1),
+            Some(vec![101, 102]),
+            now_unix,
+        );
+        session.bind_sort_mode("claude", "session_b", Some(2), Some(vec![201]), now_unix);
+
+        {
+            let mut cache = recent_errors.lock().expect("lock recent_errors");
+            cache.insert_unavailable_for_tests(now_unix, 77, "fp-codex", 30);
+            cache.insert_unavailable_for_tests(now_unix, 88, "fp-claude", 30);
+        }
+
+        let manager = GatewayManager {
+            running: Some(build_running_gateway(
+                &rt,
+                session.clone(),
+                recent_errors.clone(),
+            )),
+        };
+
+        let cleared = manager
+            .running
+            .as_ref()
+            .expect("running gateway")
+            .clear_cli_route_runtime_state("codex");
+        assert_eq!(cleared.cleared_sessions, 1);
+        assert_eq!(cleared.cleared_recent_errors, 2);
+
+        assert_eq!(
+            session.get_bound_sort_mode_id("codex", "session_a", now_unix),
+            None
+        );
+        assert_eq!(
+            session.get_bound_sort_mode_id("claude", "session_b", now_unix),
+            Some(Some(2))
+        );
+
+        let cache = recent_errors.lock().expect("lock recent_errors");
+        assert!(!cache.has_active_error_for_tests(now_unix, 77, "fp-codex"));
+        assert!(!cache.has_active_error_for_tests(now_unix, 88, "fp-claude"));
+    }
+
     fn insert_provider(db: &crate::db::Db, cli_key: &str, name: &str) -> i64 {
         providers::upsert(
             db,

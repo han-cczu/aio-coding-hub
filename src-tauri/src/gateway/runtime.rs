@@ -42,6 +42,12 @@ pub(crate) type GatewayRuntimeHandles = (
     tauri::async_runtime::JoinHandle<()>,
 );
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct GatewayRouteRuntimeClearResult {
+    pub(crate) cleared_sessions: usize,
+    pub(crate) cleared_recent_errors: usize,
+}
+
 pub(super) struct GatewayRuntimeInit {
     pub(super) port: u16,
     pub(super) base_url: String,
@@ -102,6 +108,20 @@ impl GatewayRuntime {
         self.session.clear_cli_bindings(cli_key)
     }
 
+    pub(crate) fn clear_recent_errors(&self) -> usize {
+        self.recent_errors.lock_or_recover().clear()
+    }
+
+    pub(crate) fn clear_cli_route_runtime_state(
+        &self,
+        cli_key: &str,
+    ) -> GatewayRouteRuntimeClearResult {
+        GatewayRouteRuntimeClearResult {
+            cleared_sessions: self.clear_cli_session_bindings(cli_key),
+            cleared_recent_errors: self.clear_recent_errors(),
+        }
+    }
+
     pub(crate) fn circuit_status(
         &self,
         provider_ids: &[i64],
@@ -127,14 +147,14 @@ impl GatewayRuntime {
 
     pub(crate) fn circuit_reset_provider(&self, provider_id: i64, now_unix: i64) {
         self.circuit.reset(provider_id, now_unix);
-        self.recent_errors.lock_or_recover().clear();
+        self.clear_recent_errors();
     }
 
     pub(crate) fn circuit_reset_cli(&self, provider_ids: &[i64], now_unix: i64) {
         for provider_id in provider_ids {
             self.circuit.reset(*provider_id, now_unix);
         }
-        self.recent_errors.lock_or_recover().clear();
+        self.clear_recent_errors();
     }
 
     pub(crate) fn update_circuit_config(&self, failure_threshold: u32, open_duration_secs: i64) {

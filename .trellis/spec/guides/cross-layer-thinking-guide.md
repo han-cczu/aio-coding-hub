@@ -465,8 +465,10 @@ provider list and sort templates intentionally have different ownership.
 **Good**: Define the eligibility owner for each route view explicitly. The
 default provider route is gated by `providers.enabled`; a sort-template route is
 gated by `sort_mode_providers.enabled` and must not silently inherit the
-default route's global switch. Runtime session bindings must be cleared after
-successful changes to the eligibility owner for that route view.
+default route's global switch. Runtime route state must be cleared after
+successful changes to the eligibility owner for that route view. Route state is
+not only session bindings; recent `GW_ALL_PROVIDERS_UNAVAILABLE` cache entries
+also short-circuit requests before failover/logging and must be invalidated.
 
 Provider-eligibility checklist:
 - Before changing a gateway candidate query, write down whether it represents
@@ -475,8 +477,11 @@ Provider-eligibility checklist:
 - Sort-template gateway queries must apply `sort_mode_providers.enabled = 1`
   and must not depend on `providers.enabled`.
 - Provider create/save/toggle/delete and sort-mode membership changes clear
-  runtime session bindings for the affected CLI key after persistence succeeds
-  when they change that route view's eligibility.
+  runtime route state for the affected CLI key after persistence succeeds when
+  they change that route view's eligibility.
+- Runtime route-state invalidation must clear both session bindings and recent
+  unavailable-error cache entries; otherwise enabling another provider can still
+  return the old cached unavailable response without writing a new request log.
 - Regression tests cover both the default provider list and active sort-mode
   paths.
 
@@ -529,7 +534,8 @@ After implementation:
       flags) are still owned centrally instead of drifting across layers
 - [ ] Confirmed each route/provider view uses its documented enable owner
       (default provider route vs sort-template route) and invalidates stale
-      runtime session bindings after successful eligibility changes
+      runtime route state after successful eligibility changes, including
+      session bindings and recent unavailable-error cache
 - [ ] Classified helper/probe routes as user-visible vs infra-only and verified
       logs, events, stats, and provider-health side effects match that choice
 - [ ] If the change touches gateway/proxy paths, explicitly list all non-passthrough
