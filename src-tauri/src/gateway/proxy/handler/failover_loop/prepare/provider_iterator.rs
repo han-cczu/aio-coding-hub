@@ -130,11 +130,11 @@ pub(super) async fn prepare_provider(
         }
     };
 
-    let provider_max_attempts = if provider.auth_mode == "oauth" {
-        input.max_attempts_per_provider.max(2)
-    } else {
-        input.max_attempts_per_provider
-    };
+    let provider_max_attempts = provider_max_attempts_for_request(
+        input.max_attempts_per_provider,
+        provider.auth_mode == "oauth",
+        codex_request_has_previous_response_id(input),
+    );
 
     let mut provider_base_url_base = match provider_checks::resolve_base_url(
         input,
@@ -334,4 +334,78 @@ pub(super) async fn prepare_provider(
         anthropic_stream_requested,
         stream_idle_timeout_seconds: provider.stream_idle_timeout_seconds,
     }))
+}
+
+fn codex_request_has_previous_response_id(input: &RequestContext) -> bool {
+    codex_body_has_previous_response_id(&input.cli_key, &input.body_bytes)
+}
+
+fn codex_body_has_previous_response_id(cli_key: &str, body: &[u8]) -> bool {
+    if cli_key != "codex" {
+        return false;
+    }
+
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|root| {
+            root.get("previous_response_id")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .map(str::to_string)
+        })
+        .is_some_and(|value| !value.is_empty())
+}
+
+fn provider_max_attempts_for_request(
+    configured_max_attempts: u32,
+    needs_oauth_reactive_refresh_retry: bool,
+    needs_codex_previous_response_id_retry: bool,
+) -> u32 {
+    let required_internal_retries = u32::from(needs_oauth_reactive_refresh_retry)
+        + u32::from(needs_codex_previous_response_id_retry);
+    configured_max_attempts.max(1 + required_internal_retries)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{codex_body_has_previous_response_id, provider_max_attempts_for_request};
+
+    fn body(value: serde_json::Value) -> Vec<u8> {
+        serde_json::to_vec(&value).expect("serialize body")
+    }
+
+    #[test]
+    fn codex_request_has_previous_response_id_detects_codex_continuation() {
+        let body = body(serde_json::json!({
+            "previous_response_id": "resp_123"
+        }));
+
+        assert!(codex_body_has_previous_response_id("codex", &body));
+    }
+
+    #[test]
+    fn codex_request_has_previous_response_id_ignores_other_cli_or_missing_value() {
+        let with_previous = body(serde_json::json!({
+            "previous_response_id": "resp_123"
+        }));
+        let without_previous = body(serde_json::json!({}));
+
+        assert!(!codex_body_has_previous_response_id(
+            "claude",
+            &with_previous
+        ));
+        assert!(!codex_body_has_previous_response_id(
+            "codex",
+            &without_previous
+        ));
+    }
+
+    #[test]
+    fn provider_max_attempts_reserves_budget_for_internal_retries() {
+        assert_eq!(provider_max_attempts_for_request(1, false, false), 1);
+        assert_eq!(provider_max_attempts_for_request(1, true, false), 2);
+        assert_eq!(provider_max_attempts_for_request(1, false, true), 2);
+        assert_eq!(provider_max_attempts_for_request(1, true, true), 3);
+        assert_eq!(provider_max_attempts_for_request(5, true, true), 5);
+    }
 }

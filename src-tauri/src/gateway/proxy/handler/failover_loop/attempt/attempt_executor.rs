@@ -12,6 +12,7 @@ use crate::gateway::proxy::request_context::RequestContext;
 pub(super) struct RetryLoopState {
     pub(super) claude_api_key_bearer_fallback: bool,
     pub(super) oauth_reactive_refreshed_once: bool,
+    pub(super) codex_previous_response_id_rectifier_retried: bool,
     pub(super) thinking_signature_rectifier_retried: bool,
     pub(super) thinking_budget_rectifier_retried: bool,
 }
@@ -21,6 +22,7 @@ impl RetryLoopState {
         Self {
             claude_api_key_bearer_fallback: false,
             oauth_reactive_refreshed_once: false,
+            codex_previous_response_id_rectifier_retried: false,
             thinking_signature_rectifier_retried: false,
             thinking_budget_rectifier_retried: false,
         }

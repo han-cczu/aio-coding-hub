@@ -130,8 +130,82 @@ async fn read_response_body_with_optional_limit(
 pub(super) struct UpstreamRequestState<'a> {
     pub(super) upstream_body_bytes: &'a mut Bytes,
     pub(super) strip_request_content_encoding: &'a mut bool,
+    pub(super) codex_previous_response_id_rectifier_retried: &'a mut bool,
     pub(super) thinking_signature_rectifier_retried: &'a mut bool,
     pub(super) thinking_budget_rectifier_retried: &'a mut bool,
+}
+
+fn codex_request_has_previous_response_id(body: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(body)
+        .ok()
+        .and_then(|root| {
+            root.get("previous_response_id")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .map(str::to_string)
+        })
+        .is_some_and(|value| !value.is_empty())
+}
+
+fn should_scan_codex_previous_response_id_error(
+    cli_key: &str,
+    status: reqwest::StatusCode,
+    already_retried: bool,
+    upstream_body: &[u8],
+) -> bool {
+    cli_key == "codex"
+        && !already_retried
+        && matches!(
+            status,
+            reqwest::StatusCode::BAD_REQUEST | reqwest::StatusCode::NOT_FOUND
+        )
+        && codex_request_has_previous_response_id(upstream_body)
+}
+
+fn matches_codex_previous_response_id_error(status: reqwest::StatusCode, body: &[u8]) -> bool {
+    if !matches!(
+        status,
+        reqwest::StatusCode::BAD_REQUEST | reqwest::StatusCode::NOT_FOUND
+    ) {
+        return false;
+    }
+    if body.is_empty() {
+        return false;
+    }
+
+    let haystack = String::from_utf8_lossy(body).to_ascii_lowercase();
+    let mentions_previous_response = haystack.contains("previous_response_id")
+        || haystack.contains("previous response")
+        || haystack.contains("previous response id");
+    let says_missing = haystack.contains("not found")
+        || haystack.contains("no response")
+        || haystack.contains("could not find")
+        || haystack.contains("does not exist")
+        || haystack.contains("unknown")
+        || haystack.contains("invalid");
+
+    mentions_previous_response && says_missing
+}
+
+fn remove_codex_previous_response_id(body: &mut Bytes) -> bool {
+    let Ok(mut root) = serde_json::from_slice::<serde_json::Value>(body) else {
+        return false;
+    };
+
+    let Some(obj) = root.as_object_mut() else {
+        return false;
+    };
+    if obj.remove("previous_response_id").is_none() {
+        return false;
+    }
+
+    match serde_json::to_vec(&root) {
+        Ok(next) => {
+            *body = Bytes::from(next);
+            true
+        }
+        Err(_) => false,
+    }
 }
 
 pub(super) struct HandleNonSuccessResponseInput<'a> {
@@ -241,7 +315,14 @@ pub(super) async fn handle_non_success_response(
         ) || status.as_u16() == 429);
     let need_5xx_body_preview =
         !is_count_tokens && status.is_server_error() && !need_client_error_scan;
-    if need_client_error_scan || need_5xx_body_preview {
+    let need_codex_previous_response_id_scan = !is_count_tokens
+        && should_scan_codex_previous_response_id_error(
+            ctx.cli_key.as_str(),
+            status,
+            *upstream.codex_previous_response_id_rectifier_retried,
+            upstream.upstream_body_bytes,
+        );
+    if need_client_error_scan || need_5xx_body_preview || need_codex_previous_response_id_scan {
         if let Some(r) = resp.take() {
             let read_result = if r.content_length().is_none() {
                 read_response_body_with_optional_limit(
@@ -307,6 +388,31 @@ pub(super) async fn handle_non_success_response(
                     abort_body_bytes = Some(body_for_scan);
                     abort_response_headers = Some(headers_for_scan);
                 }
+            }
+        }
+    }
+
+    if need_codex_previous_response_id_scan {
+        if let Some(body) = abort_body_bytes.as_deref() {
+            if matches_codex_previous_response_id_error(status, body)
+                && remove_codex_previous_response_id(upstream.upstream_body_bytes)
+            {
+                *upstream.codex_previous_response_id_rectifier_retried = true;
+                *upstream.strip_request_content_encoding = true;
+                ctx.special_settings
+                    .lock_or_recover()
+                    .push(serde_json::json!({
+                        "type": "codex_previous_response_id_rectifier",
+                        "scope": "attempt",
+                        "hit": true,
+                        "action": "remove_previous_response_id_and_retry",
+                        "providerId": provider_id,
+                        "providerName": provider_name_base,
+                        "status": status.as_u16(),
+                        "retryAttemptNumber": retry_index,
+                        "retryAttemptNumberNext": retry_index + 1,
+                    }));
+                return LoopControl::ContinueRetry;
             }
         }
     }
@@ -671,9 +777,11 @@ pub(super) async fn handle_reqwest_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        reqwest_error_decision, should_abort_unmatched_client_error, upstream_error_decision,
-        FailoverDecision,
+        matches_codex_previous_response_id_error, remove_codex_previous_response_id,
+        reqwest_error_decision, should_abort_unmatched_client_error,
+        should_scan_codex_previous_response_id_error, upstream_error_decision, FailoverDecision,
     };
+    use axum::body::Bytes;
 
     #[test]
     fn upstream_error_decision_aborts_for_count_tokens() {
@@ -701,6 +809,76 @@ mod tests {
 
         let abort_decision = upstream_error_decision(false, FailoverDecision::Abort, 1, 5);
         assert!(matches!(abort_decision, FailoverDecision::Abort));
+    }
+
+    #[test]
+    fn codex_previous_response_id_scan_requires_codex_400_or_404_with_previous_response_id() {
+        let body = br#"{"previous_response_id":"resp_old"}"#;
+
+        assert!(should_scan_codex_previous_response_id_error(
+            "codex",
+            reqwest::StatusCode::BAD_REQUEST,
+            false,
+            body,
+        ));
+        assert!(should_scan_codex_previous_response_id_error(
+            "codex",
+            reqwest::StatusCode::NOT_FOUND,
+            false,
+            body,
+        ));
+        assert!(!should_scan_codex_previous_response_id_error(
+            "claude",
+            reqwest::StatusCode::BAD_REQUEST,
+            false,
+            body,
+        ));
+        assert!(!should_scan_codex_previous_response_id_error(
+            "codex",
+            reqwest::StatusCode::BAD_REQUEST,
+            true,
+            body,
+        ));
+        assert!(!should_scan_codex_previous_response_id_error(
+            "codex",
+            reqwest::StatusCode::INTERNAL_SERVER_ERROR,
+            false,
+            body,
+        ));
+    }
+
+    #[test]
+    fn codex_previous_response_id_error_match_is_specific_to_missing_previous_response() {
+        assert!(matches_codex_previous_response_id_error(
+            reqwest::StatusCode::BAD_REQUEST,
+            br#"{"error":{"message":"No response found for previous_response_id resp_old"}}"#,
+        ));
+        assert!(matches_codex_previous_response_id_error(
+            reqwest::StatusCode::BAD_REQUEST,
+            br#"{"error":{"message":"No response found with id 'resp_old'","param":"previous_response_id"}}"#,
+        ));
+        assert!(matches_codex_previous_response_id_error(
+            reqwest::StatusCode::NOT_FOUND,
+            br#"Previous response id does not exist"#,
+        ));
+        assert!(!matches_codex_previous_response_id_error(
+            reqwest::StatusCode::BAD_REQUEST,
+            br#"{"error":{"message":"model is required"}}"#,
+        ));
+    }
+
+    #[test]
+    fn remove_codex_previous_response_id_keeps_other_body_fields() {
+        let mut body = Bytes::from_static(
+            br#"{"model":"gpt-5","previous_response_id":"resp_old","input":"hello"}"#,
+        );
+
+        assert!(remove_codex_previous_response_id(&mut body));
+        let json: serde_json::Value = serde_json::from_slice(&body).expect("json body");
+
+        assert_eq!(json.get("previous_response_id"), None);
+        assert_eq!(json["model"], "gpt-5");
+        assert_eq!(json["input"], "hello");
     }
 
     #[test]

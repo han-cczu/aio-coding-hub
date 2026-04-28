@@ -485,7 +485,33 @@ Provider-eligibility checklist:
 - Regression tests cover both the default provider list and active sort-mode
   paths.
 
-### Mistake 20: Treating Process-Wide Test Environment as Test-Local State
+### Mistake 20: Treating Provider-Scoped Continuation IDs as Route-Scoped State
+
+**Bad**: After a circuit-open Codex provider is disabled and another provider is
+enabled, forward the next `/v1/responses` request with the old
+`previous_response_id` and count the new provider's 400/404 as a health failure.
+The response id belongs to the upstream provider that created it, not to the
+route, session binding, or local gateway.
+
+**Good**: When a Codex upstream returns a specific missing/invalid previous
+response error for a request carrying `previous_response_id`, strip only that
+field and retry the same provider once. Record the mutation in
+`special_settings_json`, do not increment circuit/cooldown for the discarded
+attempt, and keep enough per-provider retry budget for other internal retries
+such as OAuth reactive refresh.
+
+Provider-continuation checklist:
+- Treat upstream-generated continuation handles (`previous_response_id`,
+  vendor response ids, bridge conversation ids) as provider-scoped unless the
+  upstream contract explicitly says they are portable.
+- On provider switch/failover, distinguish "stale provider-scoped continuation"
+  from true provider failure before mutating circuit-breaker state.
+- Gate body repair by CLI, status, request field presence, and upstream error
+  text; do not retry arbitrary 400/404 responses.
+- If a repair consumes an internal retry, reserve retry budget independently
+  from normal provider failover attempts.
+
+### Mistake 21: Treating Process-Wide Test Environment as Test-Local State
 
 **Bad**: A test fixture mutates process-wide environment variables while a
 mutex guard is dropped before the restore guard. Parallel `cargo test` runs can
@@ -538,6 +564,9 @@ After implementation:
       (default provider route vs sort-template route) and invalidates stale
       runtime route state after successful eligibility changes, including
       session bindings and recent unavailable-error cache
+- [ ] Checked provider-scoped continuation ids before provider-health mutation:
+      stale Codex `previous_response_id` errors are repaired once and recorded
+      as a guarded body mutation, not as circuit-breaker evidence
 - [ ] For request logs, separated real upstream attempts from provider-gate
       skips in user-facing wording
 - [ ] For request logs, documented unsupported CLI folder lookup instead of
