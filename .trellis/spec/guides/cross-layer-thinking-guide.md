@@ -174,10 +174,15 @@ back to disk.
 Config write checklist:
 - Decide whether read failure should block writes, offer reset, or restore from
   backup. Do not let `unwrap_or_default()` make that choice implicitly.
+- For multi-file config apply flows, parse and build every target output before
+  writing the first file. A parse failure in a later file must not leave an
+  earlier file partially switched to proxy/managed state.
 - Log the failure with enough context to diagnose file corruption or migration
   drift.
 - Add one test that proves a read failure does not silently erase unrelated
   fields on the next save.
+- Add one test where the first target can be built but a later target fails to
+  parse, proving no target file was modified.
 - For app-owned settings files, persist the full managed snapshot. Do not drop
   keys just because they equal today's default.
 - For third-party config bridges, document whether each field is explicitly
@@ -555,6 +560,26 @@ Third-party config checklist:
 - Invalid JSON must fail closed. Do not downgrade parse failures into `{}` and
   then write defaults back over user config.
 
+### Mistake 23: Treating Provider Probe Status Codes as the Whole Contract
+
+**Bad**: Mark a provider available whenever the probe returns any non-401/403
+HTTP response. Some upstreams report invalid credentials as 400 with an auth
+message, while 5xx proves the endpoint responded but not that the provider is
+usable.
+
+**Good**: Classify provider probe results with both status and body semantics:
+explicit auth failures fail closed, upstream 5xx is unavailable, and expected
+model/rate-limit errors can still prove the route and credential reached the
+provider.
+
+Provider-probe checklist:
+- Keep auth-failure detection provider-aware enough to cover body-level errors
+  such as "API key not valid" and `invalid_api_key`.
+- Treat 5xx probe responses as unavailable unless product requirements define a
+  separate degraded state.
+- Regression tests must cover model-not-found/rate-limit success, 5xx failure,
+  and body-level auth failure with a 4xx status.
+
 ---
 
 ## Checklist for Cross-Layer Features
@@ -589,6 +614,8 @@ After implementation:
       as a guarded body mutation, not as circuit-breaker evidence
 - [ ] Classified helper/probe routes as user-visible vs infra-only and verified
       logs, events, stats, and provider-health side effects match that choice
+- [ ] Classified provider availability probe results by status and body
+      semantics, including 5xx and body-level auth errors
 - [ ] If the change touches gateway/proxy paths, explicitly list all non-passthrough
       mutations (headers, path/query, body JSON, response translation) and ensure each
       mutation is either:
