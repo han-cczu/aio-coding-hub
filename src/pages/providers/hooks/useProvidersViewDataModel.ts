@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 import { PointerSensor, type DragEndEvent, useSensor, useSensors } from "@dnd-kit/core";
-import { arrayMove } from "@dnd-kit/sortable";
 import { logToConsole } from "../../../services/consoleLog";
 import { copyText } from "../../../services/clipboard";
 import type { GatewayProviderCircuitStatus } from "../../../services/gateway/gateway";
@@ -25,6 +24,7 @@ import {
   useProvidersReorderMutation,
 } from "../../../query/providers";
 import type { ProviderEditorInitialValues } from "../providerDuplicate";
+import { reorderVisibleItems } from "../reorderVisibleItems";
 
 type CreateDialogState = {
   cliKey: CliKey;
@@ -425,11 +425,15 @@ export function useProvidersViewDataModel(activeCli: CliKey) {
 
     const cliKey = activeCliRef.current;
     const previousProviders = providersRef.current;
-    const oldIndex = previousProviders.findIndex((provider) => provider.id === active.id);
-    const newIndex = previousProviders.findIndex((provider) => provider.id === over.id);
-    if (oldIndex === -1 || newIndex === -1) return;
+    const nextProviders = reorderVisibleItems({
+      items: previousProviders,
+      activeId: active.id,
+      overId: over.id,
+      getId: (provider) => provider.id,
+      isVisible: (provider) => provider.enabled,
+    });
+    if (!nextProviders) return;
 
-    const nextProviders = arrayMove(previousProviders, oldIndex, newIndex);
     void persistProvidersOrder(cliKey, nextProviders);
   }
 

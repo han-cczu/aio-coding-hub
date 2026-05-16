@@ -503,6 +503,7 @@ export function useSortModesDataModel({
     if (oldIndex === -1 || newIndex === -1) return;
 
     const nextRows = arrayMove(prevRows, oldIndex, newIndex);
+
     setModeProviders(nextRows);
     modeProvidersRef.current = nextRows;
     void persistModeProvidersOrder(modeId, activeCliRef.current, nextRows, prevRows);

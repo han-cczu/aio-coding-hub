@@ -249,6 +249,70 @@ describe("pages/providers/SortModesView", () => {
     await waitFor(() => expect(vi.mocked(sortModeDelete)).toHaveBeenCalledWith({ mode_id: 2 }));
   });
 
+  it("reorders all template rows from the order panel", async () => {
+    vi.mocked(sortModesList).mockResolvedValue([{ id: 1, name: "Work" }] as any);
+    vi.mocked(sortModeActiveList).mockResolvedValue([{ cli_key: "claude", mode_id: 1 }] as any);
+    vi.mocked(sortModeProvidersList).mockResolvedValue([
+      { provider_id: 101, enabled: true },
+      { provider_id: 102, enabled: false },
+      { provider_id: 103, enabled: true },
+    ] as any);
+    vi.mocked(sortModeProvidersSetOrder).mockClear();
+    vi.mocked(sortModeProvidersSetOrder).mockResolvedValue([
+      { provider_id: 102, enabled: false },
+      { provider_id: 103, enabled: true },
+      { provider_id: 101, enabled: true },
+    ] as any);
+
+    renderWithQueryClient(
+      <SortModesView
+        activeCli="claude"
+        setActiveCli={vi.fn()}
+        providers={
+          [
+            {
+              id: 101,
+              name: "P1",
+              enabled: true,
+              base_urls: ["https://a"],
+              base_url_mode: "order",
+            },
+            {
+              id: 102,
+              name: "P2",
+              enabled: true,
+              base_urls: ["https://b"],
+              base_url_mode: "order",
+            },
+            {
+              id: 103,
+              name: "P3",
+              enabled: true,
+              base_urls: ["https://c"],
+              base_url_mode: "order",
+            },
+          ] as any
+        }
+        providersLoading={false}
+      />
+    );
+
+    await waitFor(() => expect(screen.getByRole("button", { name: "Work" })).toBeInTheDocument());
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
+    const orderPanel = () =>
+      within(screen.getByRole("complementary", { name: "排序模板调用顺序" }));
+    await waitFor(() => expect(orderPanel().getByText("P1")).toBeInTheDocument());
+    expect(orderPanel().getByText("P2")).toBeInTheDocument();
+    expect(orderPanel().getByText("P3")).toBeInTheDocument();
+
+    latestOnDragEnd?.({ active: { id: 101 }, over: { id: 103 } });
+    await waitFor(() =>
+      expect(vi.mocked(sortModeProvidersSetOrder)).toHaveBeenCalledWith(
+        expect.objectContaining({ ordered_provider_ids: [102, 103, 101] })
+      )
+    );
+  });
+
   it("supports toggling provider enabled state inside a sort mode", async () => {
     vi.mocked(sortModesList).mockResolvedValue([{ id: 1, name: "Work" }] as any);
     vi.mocked(sortModeActiveList).mockResolvedValue([{ cli_key: "claude", mode_id: 1 }] as any);
@@ -288,12 +352,16 @@ describe("pages/providers/SortModesView", () => {
     );
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Work" })).toBeInTheDocument());
-    await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(2));
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
+    const orderPanel = () =>
+      within(screen.getByRole("complementary", { name: "排序模板调用顺序" }));
+    await waitFor(() => expect(orderPanel().getByText("P1")).toBeInTheDocument());
+    expect(orderPanel().getByText("P2")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(orderPanel().getByRole("switch", { name: "启用 P2" })).toBeInTheDocument()
+    );
 
-    const switches = screen.getAllByRole("switch");
-    expect(switches[1]).toHaveAttribute("aria-checked", "false");
-
-    fireEvent.click(switches[1]!);
+    fireEvent.click(orderPanel().getByRole("switch", { name: "启用 P2" }));
     await waitFor(() =>
       expect(vi.mocked(sortModeProviderSetEnabled)).toHaveBeenCalledWith({
         mode_id: 1,
@@ -302,6 +370,7 @@ describe("pages/providers/SortModesView", () => {
         enabled: true,
       })
     );
+    await waitFor(() => expect(orderPanel().getByText("P2")).toBeInTheDocument());
   });
 
   it("covers create/rename validation, error branches, and delete dialog gating", async () => {
@@ -430,11 +499,13 @@ describe("pages/providers/SortModesView", () => {
       />
     );
 
-    await waitFor(() => expect(screen.getByRole("button", { name: "移除" })).toBeInTheDocument());
-    const removeButton = screen.getByRole("button", { name: "移除" });
-    // Card uses rounded-xl on mobile, rounded-2xl on larger screens
-    const draggingCard = removeButton.closest("div[class*='rounded-']");
-    expect(draggingCard?.className).toContain("ring-2");
+    const orderPanel = within(screen.getByRole("complementary", { name: "排序模板调用顺序" }));
+    await waitFor(() =>
+      expect(orderPanel.getByRole("button", { name: "移除" })).toBeInTheDocument()
+    );
+    expect(
+      screen.getByRole("complementary", { name: "排序模板调用顺序" }).querySelector(".ring-2")
+    ).toBeTruthy();
 
     sortableIsDragging = false;
   });
@@ -469,23 +540,29 @@ describe("pages/providers/SortModesView", () => {
     await waitFor(() => expect(screen.getByRole("button", { name: "Work" })).toBeInTheDocument());
 
     // right list should be populated (provider rows rendered)
+    const orderPanel = () =>
+      within(screen.getByRole("complementary", { name: "排序模板调用顺序" }));
     await waitFor(() =>
-      expect(screen.getAllByRole("button", { name: "移除" }).length).toBeGreaterThan(0)
+      expect(orderPanel().getAllByRole("button", { name: "移除" })).toHaveLength(2)
     );
 
     // pointerdown handler stops propagation (coverage)
-    fireEvent.pointerDown(screen.getAllByRole("button", { name: "移除" })[0]!);
+    fireEvent.pointerDown(orderPanel().getAllByRole("button", { name: "移除" })[0]!);
 
     // 1) persist throws -> toast and revert
-    fireEvent.click(screen.getAllByRole("button", { name: "移除" })[0]!);
+    fireEvent.click(orderPanel().getAllByRole("button", { name: "移除" })[0]!);
     await waitFor(() => expect(vi.mocked(sortModeProvidersSetOrder)).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(vi.mocked(toast)).toHaveBeenCalled());
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "移除" })).toHaveLength(2));
+    await waitFor(() =>
+      expect(orderPanel().getAllByRole("button", { name: "移除" })).toHaveLength(2)
+    );
 
     // 2) persist succeeds -> P1 removed from mode
-    fireEvent.click(screen.getAllByRole("button", { name: "移除" })[0]!);
+    fireEvent.click(orderPanel().getAllByRole("button", { name: "移除" })[0]!);
     await waitFor(() => expect(vi.mocked(sortModeProvidersSetOrder)).toHaveBeenCalledTimes(2));
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "移除" })).toHaveLength(1));
+    await waitFor(() =>
+      expect(orderPanel().getAllByRole("button", { name: "移除" })).toHaveLength(1)
+    );
 
     // drag end edge cases
     latestOnDragEnd?.({ active: { id: 101 }, over: null });

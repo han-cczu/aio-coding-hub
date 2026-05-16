@@ -331,6 +331,16 @@ describe("pages/providers/ProvidersView", () => {
         cost_multiplier: 1,
         claude_models: {},
       },
+      {
+        id: 3,
+        cli_key: "claude",
+        name: "P3",
+        enabled: true,
+        base_urls: ["https://c"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+      },
     ] as any[];
 
     vi.mocked(useProvidersListQuery).mockReturnValue({
@@ -343,6 +353,7 @@ describe("pages/providers/ProvidersView", () => {
       data: [
         { provider_id: 1, state: "OPEN", open_until: null, cooldown_until: null },
         { provider_id: 2, state: "CLOSED", open_until: null, cooldown_until: null },
+        { provider_id: 3, state: "CLOSED", open_until: null, cooldown_until: null },
       ],
       isFetching: false,
       error: null,
@@ -358,7 +369,7 @@ describe("pages/providers/ProvidersView", () => {
     vi.mocked(useProviderDeleteMutation).mockReturnValue(deleteMutation as any);
 
     const reorderMutation = { isPending: false, mutateAsync: vi.fn() };
-    reorderMutation.mutateAsync.mockResolvedValue([providers[1], providers[0]]);
+    reorderMutation.mutateAsync.mockResolvedValue([providers[2], providers[1], providers[0]]);
     vi.mocked(useProvidersReorderMutation).mockReturnValue(reorderMutation as any);
 
     const resetProviderMutation = { isPending: false, mutateAsync: vi.fn(), variables: null };
@@ -376,6 +387,13 @@ describe("pages/providers/ProvidersView", () => {
     vi.mocked(copyText).mockResolvedValue(undefined);
 
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
+
+    expect(screen.getByText("调用顺序")).toBeInTheDocument();
+    expect(screen.getByText("调用顺序按照从上到下依次调用")).toBeInTheDocument();
+    const orderPanel = within(screen.getByRole("complementary", { name: "供应商调用顺序" }));
+    expect(orderPanel.getByText("P1")).toBeInTheDocument();
+    expect(orderPanel.getByText("P3")).toBeInTheDocument();
+    expect(orderPanel.queryByText("P2")).not.toBeInTheDocument();
 
     // Toggle provider 2 to enabled.
     fireEvent.click(screen.getAllByRole("switch")[1]!);
@@ -425,13 +443,14 @@ describe("pages/providers/ProvidersView", () => {
       expect(deleteMutation.mutateAsync).toHaveBeenCalledWith({ cliKey: "claude", providerId: 1 })
     );
 
-    // Drag reorder providers (1 -> 2).
-    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 2 } });
+    // Drag reorder enabled providers (1 -> 3), preserving hidden disabled provider 2 slot.
+    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 3 } });
     await waitFor(() =>
       expect(reorderMutation.mutateAsync).toHaveBeenCalledWith({
         cliKey: "claude",
-        orderedProviderIds: [2, 1],
+        orderedProviderIds: [3, 2, 1],
         optimisticProviders: [
+          expect.objectContaining({ id: 3, name: "P3", enabled: true }),
           expect.objectContaining({ id: 2, name: "P2", enabled: false }),
           expect.objectContaining({ id: 1, name: "P1", enabled: true }),
         ],
@@ -690,18 +709,22 @@ describe("pages/providers/ProvidersView", () => {
     renderWithQuery(<ProvidersView activeCli="claude" setActiveCli={vi.fn()} />);
 
     expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument();
+    expect(screen.getByText("调用顺序按照从上到下依次调用")).toBeInTheDocument();
 
     const searchInput = screen.getByRole("textbox", { name: "搜索供应商名称" });
     fireEvent.change(searchInput, { target: { value: "beta" } });
 
-    expect(screen.getByText("Beta Gateway")).toBeInTheDocument();
-    expect(screen.queryByText("Alpha Relay")).not.toBeInTheDocument();
+    expect(screen.getAllByText("Beta Gateway").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Alpha Relay")).toHaveLength(1);
+    const orderPanel = within(screen.getByRole("complementary", { name: "供应商调用顺序" }));
+    expect(orderPanel.getByLabelText("第 1 位")).toBeInTheDocument();
+    expect(orderPanel.getByLabelText("第 2 位")).toBeInTheDocument();
     expect(screen.getByText("共 1 / 2 条")).toBeInTheDocument();
 
     fireEvent.change(searchInput, { target: { value: "" } });
 
-    expect(screen.getByText("Alpha Relay")).toBeInTheDocument();
-    expect(screen.getByText("Beta Gateway")).toBeInTheDocument();
+    expect(screen.getAllByText("Alpha Relay").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Beta Gateway").length).toBeGreaterThan(0);
     expect(screen.getByText("共 2 / 2 条")).toBeInTheDocument();
   });
 
@@ -990,6 +1013,16 @@ describe("pages/providers/ProvidersView", () => {
         cost_multiplier: 2,
         claude_models: {},
       },
+      {
+        id: 3,
+        cli_key: "claude",
+        name: "P3",
+        enabled: true,
+        base_urls: ["https://c"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+      },
     ] as any[];
 
     vi.mocked(useProvidersListQuery).mockReturnValue({ data: providers, isFetching: false } as any);
@@ -1000,6 +1033,7 @@ describe("pages/providers/ProvidersView", () => {
         // OPEN with no open_until/cooldown_until => until=null branch (auto refresh immediately)
         { provider_id: 1, state: "OPEN", open_until: null, cooldown_until: null },
         { provider_id: 2, state: "OPEN", open_until: null, cooldown_until: null },
+        { provider_id: 3, state: "OPEN", open_until: null, cooldown_until: null },
       ],
       isFetching: false,
       refetch: refetchCircuits,
@@ -1074,8 +1108,8 @@ describe("pages/providers/ProvidersView", () => {
     latestOnDragEnd?.({ active: { id: 1 }, over: null });
     latestOnDragEnd?.({ active: { id: 1 }, over: { id: 1 } });
     latestOnDragEnd?.({ active: { id: 999 }, over: { id: 2 } });
-    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 2 } });
-    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 2 } });
+    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 3 } });
+    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 3 } });
     await Promise.resolve();
     await Promise.resolve();
     expect(reorderMutation.mutateAsync).toHaveBeenCalled();
@@ -1133,7 +1167,7 @@ describe("pages/providers/ProvidersView", () => {
 
     expect(screen.getByText("模型映射 1/5")).toBeInTheDocument();
     expect(screen.getByText(/^熔断\s*00:10$/)).toBeInTheDocument();
-    expect(screen.getByText("P1").closest(".shadow-lg")).toBeTruthy();
+    expect(screen.getByText("调用顺序").closest("aside")?.querySelector(".shadow-lg")).toBeTruthy();
   });
 
   it("clears circuit auto-refresh timer when circuits recover", () => {
@@ -1291,6 +1325,16 @@ describe("pages/providers/ProvidersView", () => {
         cost_multiplier: 1,
         claude_models: {},
       },
+      {
+        id: 3,
+        cli_key: "claude",
+        name: "P3",
+        enabled: true,
+        base_urls: ["https://c"],
+        base_url_mode: "order",
+        cost_multiplier: 1,
+        claude_models: {},
+      },
     ] as any[];
 
     vi.mocked(useProvidersListQuery).mockReturnValue({ data: providers, isFetching: false } as any);
@@ -1323,7 +1367,7 @@ describe("pages/providers/ProvidersView", () => {
       </QueryClientProvider>
     );
 
-    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 2 } });
+    latestOnDragEnd?.({ active: { id: 1 }, over: { id: 3 } });
     await waitFor(() => expect(reorderMutation.mutateAsync).toHaveBeenCalled());
 
     rerender(
@@ -1333,7 +1377,7 @@ describe("pages/providers/ProvidersView", () => {
     );
     await Promise.resolve();
 
-    resolveReorder([providers[1], providers[0]]);
+    resolveReorder([providers[2], providers[1], providers[0]]);
     await Promise.resolve();
     await Promise.resolve();
 
