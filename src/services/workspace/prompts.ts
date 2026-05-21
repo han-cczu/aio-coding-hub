@@ -2,6 +2,7 @@ import {
   commands,
   type DefaultPromptSyncItem as GeneratedDefaultPromptSyncItem,
   type DefaultPromptSyncReport as GeneratedDefaultPromptSyncReport,
+  type PromptListSummary as GeneratedPromptListSummary,
   type PromptSummary as GeneratedPromptSummary,
 } from "../../generated/bindings";
 import {
@@ -23,6 +24,13 @@ const DEFAULT_PROMPT_SYNC_ACTION_VALUES = [
 
 export type PromptSummary = Override<
   GeneratedPromptSummary,
+  {
+    cli_key: CliKey;
+  }
+>;
+
+export type PromptListSummary = Override<
+  GeneratedPromptListSummary,
   {
     cli_key: CliKey;
   }
@@ -100,6 +108,13 @@ function toPromptSummary(value: GeneratedPromptSummary): PromptSummary {
   };
 }
 
+function toPromptListSummary(value: GeneratedPromptListSummary): PromptListSummary {
+  return {
+    ...value,
+    cli_key: toCliKey(value.cli_key, "prompts_list_summary.cli_key"),
+  };
+}
+
 function toDefaultPromptSyncItem(value: GeneratedDefaultPromptSyncItem): DefaultPromptSyncItem {
   return {
     ...value,
@@ -127,6 +142,21 @@ export async function promptsList(workspaceId: number) {
     invoke: async () =>
       mapGeneratedCommandResponse(await commands.promptsList(normalizedWorkspaceId), (rows) =>
         rows.map(toPromptSummary)
+      ),
+  });
+}
+
+export async function promptsListSummary(workspaceId: number) {
+  const normalizedWorkspaceId = validatePromptWorkspaceId(workspaceId);
+
+  return invokeGeneratedIpc<PromptListSummary[]>({
+    title: "读取提示词摘要列表失败",
+    cmd: "prompts_list_summary",
+    args: { workspaceId: normalizedWorkspaceId },
+    invoke: async () =>
+      mapGeneratedCommandResponse(
+        await commands.promptsListSummary(normalizedWorkspaceId),
+        (rows) => rows.map(toPromptListSummary)
       ),
   });
 }

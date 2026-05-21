@@ -3,6 +3,7 @@ import {
   promptDelete,
   promptSetEnabled,
   promptUpsert,
+  promptsListSummary,
   promptsList,
   type PromptSummary,
   validatePromptWorkspaceId,
@@ -17,6 +18,23 @@ export function usePromptsListQuery(workspaceId: number | null, options?: { enab
     queryFn: () => {
       if (normalizedWorkspaceId == null) return null;
       return promptsList(normalizedWorkspaceId);
+    },
+    enabled: normalizedWorkspaceId != null && (options?.enabled ?? true),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function usePromptsListSummaryQuery(
+  workspaceId: number | null,
+  options?: { enabled?: boolean }
+) {
+  const normalizedWorkspaceId = workspaceId == null ? null : validatePromptWorkspaceId(workspaceId);
+
+  return useQuery({
+    queryKey: promptsKeys.summary(normalizedWorkspaceId),
+    queryFn: () => {
+      if (normalizedWorkspaceId == null) return null;
+      return promptsListSummary(normalizedWorkspaceId);
     },
     enabled: normalizedWorkspaceId != null && (options?.enabled ?? true),
     placeholderData: keepPreviousData,
@@ -58,6 +76,7 @@ export function usePromptUpsertMutation(workspaceId: number) {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: promptsKeys.list(normalizedWorkspaceId) });
+      queryClient.invalidateQueries({ queryKey: promptsKeys.summary(normalizedWorkspaceId) });
     },
   });
 }
@@ -86,6 +105,7 @@ export function usePromptSetEnabledMutation(workspaceId: number) {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: promptsKeys.list(normalizedWorkspaceId) });
+      queryClient.invalidateQueries({ queryKey: promptsKeys.summary(normalizedWorkspaceId) });
     },
   });
 }
@@ -108,6 +128,7 @@ export function usePromptDeleteMutation(workspaceId: number) {
     },
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: promptsKeys.list(normalizedWorkspaceId) });
+      queryClient.invalidateQueries({ queryKey: promptsKeys.summary(normalizedWorkspaceId) });
     },
   });
 }

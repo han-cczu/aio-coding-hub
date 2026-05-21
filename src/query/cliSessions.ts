@@ -23,6 +23,9 @@ import {
 } from "../services/cli/cliSessions";
 import { cliSessionsKeys } from "./keys";
 
+export const CLI_SESSIONS_MESSAGES_MAX_CACHED_PAGES = 10;
+export const CLI_SESSIONS_MESSAGES_GC_TIME_MS = 60_000;
+
 function normalizeCliSessionsMutationCacheInput(input: { projectId: string; wslDistro?: string }) {
   return {
     projectId: normalizeCliSessionsProjectId(input.projectId),
@@ -99,6 +102,8 @@ export function useCliSessionsMessagesInfiniteQuery(
     enabled: Boolean(normalizedFilePath) && (options?.enabled ?? true),
     getNextPageParam: (lastPage) => (lastPage?.has_more ? lastPage.page + 1 : undefined),
     initialPageParam: 0,
+    maxPages: CLI_SESSIONS_MESSAGES_MAX_CACHED_PAGES,
+    gcTime: CLI_SESSIONS_MESSAGES_GC_TIME_MS,
   });
 }
 

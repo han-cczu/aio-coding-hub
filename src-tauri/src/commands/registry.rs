@@ -32,6 +32,7 @@ macro_rules! generated_command_registry {
             app_startup_status_get => crate::commands::app::app_startup_status_get,
             app_startup_retry => crate::commands::app::app_startup_retry,
             app_frontend_error_report => crate::commands::app::app_frontend_error_report,
+            app_memory_diagnostics_get => crate::commands::diagnostics::app_memory_diagnostics_get,
             desktop_clipboard_write_text => crate::commands::desktop::desktop_clipboard_write_text,
             desktop_dialog_open => crate::commands::desktop::desktop_dialog_open,
             desktop_dialog_save => crate::commands::desktop::desktop_dialog_save,
@@ -124,6 +125,7 @@ macro_rules! generated_command_registry {
             model_price_aliases_set => crate::commands::model_prices::model_price_aliases_set,
             // ── prompts ──
             prompts_list => crate::commands::prompts::prompts_list,
+            prompts_list_summary => crate::commands::prompts::prompts_list_summary,
             prompts_default_sync_from_files => crate::commands::prompts::prompts_default_sync_from_files,
             prompt_upsert => crate::commands::prompts::prompt_upsert,
             prompt_set_enabled => crate::commands::prompts::prompt_set_enabled,

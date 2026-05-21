@@ -129,6 +129,14 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async appMemoryDiagnosticsGet(): Promise<Result<AppMemoryDiagnosticsSnapshot, string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("app_memory_diagnostics_get") };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async desktopClipboardWriteText(text: string): Promise<Result<boolean, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("desktop_clipboard_write_text", { text }) };
@@ -975,6 +983,14 @@ export const commands = {
       else return { status: "error", error: e as any };
     }
   },
+  async promptsListSummary(workspaceId: number): Promise<Result<PromptListSummary[], string>> {
+    try {
+      return { status: "ok", data: await TAURI_INVOKE("prompts_list_summary", { workspaceId }) };
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      else return { status: "error", error: e as any };
+    }
+  },
   async promptsDefaultSyncFromFiles(): Promise<Result<DefaultPromptSyncReport, string>> {
     try {
       return { status: "ok", data: await TAURI_INVOKE("prompts_default_sync_from_files") };
@@ -1734,6 +1750,49 @@ export type AppAboutInfo = {
   bundle_type: string | null;
   run_mode: string;
 };
+export type AppMemoryDiagnosticsCliSessionStats = {
+  source: string;
+  root: string;
+  exists: boolean;
+  file_count: number;
+  total_bytes: number;
+  max_file_bytes: number;
+  truncated: boolean;
+  top_files: AppMemoryDiagnosticsFileStat[];
+};
+export type AppMemoryDiagnosticsDbStats = {
+  path: string;
+  exists: boolean;
+  db_bytes: number;
+  wal_bytes: number;
+  shm_bytes: number;
+};
+export type AppMemoryDiagnosticsFileStat = {
+  path: string;
+  bytes: number;
+  modified_at: number | null;
+};
+export type AppMemoryDiagnosticsPromptStats = {
+  count: number;
+  total_content_len: number;
+  max_content_len: number;
+  top_items: AppMemoryDiagnosticsPromptTopItem[];
+};
+export type AppMemoryDiagnosticsPromptTopItem = {
+  id: number;
+  workspace_id: number;
+  cli_key: string;
+  name: string;
+  enabled: boolean;
+  content_len: number;
+};
+export type AppMemoryDiagnosticsSnapshot = {
+  generated_at_unix: number;
+  app_data_dir: string;
+  db: AppMemoryDiagnosticsDbStats;
+  prompt_stats: AppMemoryDiagnosticsPromptStats;
+  cli_sessions: AppMemoryDiagnosticsCliSessionStats[];
+};
 export type AppStartupStage =
   | "idle"
   | "initializing_db"
@@ -2379,6 +2438,17 @@ export type ModelPricesSyncReport = {
 };
 export type NoticeLevel = "info" | "success" | "warning" | "error";
 export type NoticeSendInput = { level: NoticeLevel; title: string | null; body: string };
+export type PromptListSummary = {
+  id: number;
+  workspace_id: number;
+  cli_key: string;
+  name: string;
+  enabled: boolean;
+  content_len: number;
+  content_preview: string;
+  created_at: number;
+  updated_at: number;
+};
 export type PromptSummary = {
   id: number;
   workspace_id: number;

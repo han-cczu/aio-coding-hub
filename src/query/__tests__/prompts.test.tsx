@@ -6,6 +6,7 @@ import {
   promptSetEnabled,
   promptUpsert,
   promptsList,
+  promptsListSummary,
 } from "../../services/workspace/prompts";
 import { createQueryWrapper, createTestQueryClient } from "../../test/utils/reactQuery";
 import { setTauriRuntime } from "../../test/utils/tauriRuntime";
@@ -15,6 +16,7 @@ import {
   usePromptSetEnabledMutation,
   usePromptUpsertMutation,
   usePromptsListQuery,
+  usePromptsListSummaryQuery,
 } from "../prompts";
 
 vi.mock("../../services/workspace/prompts", async () => {
@@ -24,6 +26,7 @@ vi.mock("../../services/workspace/prompts", async () => {
   return {
     ...actual,
     promptsList: vi.fn(),
+    promptsListSummary: vi.fn(),
     promptUpsert: vi.fn(),
     promptSetEnabled: vi.fn(),
     promptDelete: vi.fn(),
@@ -47,6 +50,21 @@ describe("query/prompts", () => {
 
     await waitFor(() => {
       expect(promptsList).toHaveBeenCalledWith(1);
+    });
+  });
+
+  it("calls promptsListSummary with tauri runtime", async () => {
+    setTauriRuntime();
+
+    vi.mocked(promptsListSummary).mockResolvedValue([]);
+
+    const client = createTestQueryClient();
+    const wrapper = createQueryWrapper(client);
+
+    renderHook(() => usePromptsListSummaryQuery(1), { wrapper });
+
+    await waitFor(() => {
+      expect(promptsListSummary).toHaveBeenCalledWith(1);
     });
   });
 
