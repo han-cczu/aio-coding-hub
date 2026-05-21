@@ -81,6 +81,22 @@ describe("ui/Sidebar", () => {
     expect(repoLink.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
+  it("opens the GitHub link through the desktop opener", async () => {
+    vi.mocked(tauriOpenUrl).mockResolvedValue(undefined as never);
+
+    render(
+      <MemoryRouter>
+        <Sidebar />
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByRole("link", { name: "AIO Coding Hub GitHub 仓库" }));
+
+    await waitFor(() => {
+      expect(tauriOpenUrl).toHaveBeenCalledWith(AIO_REPO_URL);
+    });
+  });
+
   it("opens update dialog when update candidate exists (non-portable)", () => {
     gatewayMetaRef.current = {
       gatewayAvailable: "available",

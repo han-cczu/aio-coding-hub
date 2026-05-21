@@ -1,3 +1,4 @@
+import type { MouseEvent as ReactMouseEvent } from "react";
 import { NavLink } from "react-router-dom";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -18,6 +19,7 @@ import { AIO_REPO_URL } from "../constants/urls";
 import { useDevPreviewData } from "../hooks/useDevPreviewData";
 import { useGatewayStatus, openReleasesUrl } from "../hooks/useGatewayStatus";
 import { updateDialogSetOpen } from "../hooks/useUpdateMeta";
+import { openDesktopUrl } from "../services/desktop/opener";
 import { cn } from "../utils/cn";
 
 type NavItem = {
@@ -49,6 +51,12 @@ export function Sidebar({ className }: SidebarProps) {
   const { statusText, statusTone, portText, hasUpdate, isPortable } = useGatewayStatus();
   const devPreview = useDevPreviewData();
 
+  function handleRepoClick(event: ReactMouseEvent<HTMLAnchorElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    openDesktopUrl(AIO_REPO_URL).catch(() => {});
+  }
+
   return (
     <aside
       className={cn(
@@ -67,6 +75,7 @@ export function Sidebar({ className }: SidebarProps) {
                 target="_blank"
                 rel="noopener noreferrer"
                 aria-label="AIO Coding Hub GitHub 仓库"
+                onClick={handleRepoClick}
                 className="text-muted-foreground transition hover:text-foreground"
               >
                 <svg className="h-5 w-5" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
