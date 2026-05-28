@@ -108,6 +108,7 @@ impl Sidecar {
         node_path: &str,
         script_path: PathBuf,
         callbacks: SidecarCallbacks,
+        claude_code_path: Option<String>,
     ) -> AppResult<Self> {
         if !script_path.is_file() {
             return Err(AppError::new(
@@ -128,6 +129,13 @@ impl Sidecar {
             // Detach the child's stderr/stdout from any inherited console
             // — we manage them through pipes.
             .kill_on_drop(true);
+
+        // Override SDK's bundled native CLI lookup. The sidecar reads this
+        // env var inside `session.ts` and forwards it to
+        // `pathToClaudeCodeExecutable` on every SDK `query()` call.
+        if let Some(path) = claude_code_path {
+            command.env("AIO_CHAT_CLAUDE_CODE_PATH", path);
+        }
 
         // Run in the script's own directory so relative `require()` and
         // sourcemap lookups behave the same as `node dist/chat-bridge.js`

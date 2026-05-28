@@ -112,10 +112,18 @@ export class SessionManager {
     }
 
     const inputs = createPushable(sessionId);
+    // Resolve the Claude Code CLI binary from the env var the Rust host sets
+    // (AIO_CHAT_CLAUDE_CODE_PATH). The SDK normally ships a platform-specific
+    // optional dep that supplies this binary, but pnpm/Windows installs
+    // sometimes skip optional deps, so we explicitly point at the system-wide
+    // `claude` that AIO already manages via cli_manager. Falls back to SDK
+    // defaults when the env var is unset.
+    const claudeCodePath = process.env.AIO_CHAT_CLAUDE_CODE_PATH;
     const q = query({
       prompt: inputs,
       options: {
         cwd,
+        ...(claudeCodePath ? { pathToClaudeCodeExecutable: claudeCodePath } : {}),
         // M0 does not implement canUseTool/permission; rely on SDK defaults.
       },
     });

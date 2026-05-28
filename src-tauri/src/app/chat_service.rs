@@ -251,10 +251,45 @@ async fn ensure_sidecar<R: tauri::Runtime>(
 
     let script_path = sidecar_script_path()?;
     let node_executable = resolve_node_executable();
+    let claude_code_path = resolve_claude_executable_path();
     let callbacks = build_callbacks(service.clone(), app);
-    let sidecar = Arc::new(Sidecar::spawn(&node_executable, script_path, callbacks).await?);
+    let sidecar =
+        Arc::new(Sidecar::spawn(&node_executable, script_path, callbacks, claude_code_path).await?);
     *guard = Some(sidecar.clone());
     Ok(sidecar)
+}
+
+/// Walk PATH for the `claude` binary so we can pass it to the SDK as
+/// `pathToClaudeCodeExecutable` (Option B in the chat M0 design). The SDK
+/// normally ships a platform-specific optional dep providing this binary,
+/// but pnpm/Windows installs sometimes skip optional deps (the `win32-x64`
+/// package fails to install), so the env-var override below is the most
+/// reliable way to keep chat working with the `claude` CLI the user already
+/// has installed.
+///
+/// Note: AIO's `cli_manager::claude_info_get` does richer probing
+/// (login-shell + extra home dirs), but it takes the non-generic
+/// `tauri::AppHandle` and runs blocking I/O — both inconvenient from this
+/// generic, async service. PATH-only scanning is enough for production
+/// users (claude is always added to PATH by its installer); returns `None`
+/// when not found so we fall back to the SDK default.
+fn resolve_claude_executable_path() -> Option<String> {
+    let names: &[&str] = if cfg!(windows) {
+        &["claude.cmd", "claude.exe", "claude.ps1", "claude"]
+    } else {
+        &["claude"]
+    };
+
+    let path_var = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path_var) {
+        for name in names {
+            let candidate = dir.join(name);
+            if candidate.is_file() {
+                return Some(candidate.to_string_lossy().into_owned());
+            }
+        }
+    }
+    None
 }
 
 fn build_callbacks<R: tauri::Runtime>(
