@@ -4,6 +4,7 @@
 // session on unmount.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { homeDir } from "@tauri-apps/api/path";
 import { toast } from "sonner";
 import { useChatEventStream } from "../hooks/useChatEventStream";
 import { chatCloseSession, chatCreateSession, chatSendMessage } from "../services/chat/chat";
@@ -23,12 +24,10 @@ import { PageHeader } from "../ui/PageHeader";
 import { Textarea } from "../ui/Textarea";
 import { cn } from "../utils/cn";
 
-/**
- * M0 hard-codes a default cwd. The cwd picker / per-session selection is
- * scheduled for M1. This intentionally avoids any FS probe so the page
- * stays usable even when the sidecar can't bind to the configured path.
- */
-const DEFAULT_CWD = ".";
+// M0 resolves the default cwd to the user's home directory at mount time.
+// The backend rejects relative paths and anything inside the AIO data dir
+// (`validate_cwd` in app/chat_service.rs), so a bare "." would 100% fail
+// `CHAT_INVALID_CWD` on first send. The M1 cwd picker will replace this.
 
 function formatErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -83,6 +82,24 @@ export function ChatPage() {
 
   useChatEventStream(sessionId);
 
+  // Resolve cwd via Tauri's homeDir at mount. While null, the send button is
+  // disabled and the header shows "解析中…". Failure is surfaced via the chat
+  // error banner so the user knows the issue is not their input.
+  const [cwd, setCwd] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    homeDir()
+      .then((dir) => {
+        if (!cancelled) setCwd(dir);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setChatError(`无法解析默认工作目录: ${formatErrorMessage(err)}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     resetChatStore();
     return () => {
@@ -111,9 +128,12 @@ export function ChatPage() {
 
   const ensureSession = useCallback(async (): Promise<string> => {
     if (activeSessionIdRef.current) return activeSessionIdRef.current;
+    if (!cwd) {
+      throw new Error("默认工作目录尚未解析,请稍候再试");
+    }
     setChatSessionPending(true);
     try {
-      const newSessionId = await chatCreateSession(DEFAULT_CWD);
+      const newSessionId = await chatCreateSession(cwd);
       setChatSessionId(newSessionId);
       activeSessionIdRef.current = newSessionId;
       return newSessionId;
@@ -123,7 +143,7 @@ export function ChatPage() {
       setChatError(message);
       throw error;
     }
-  }, []);
+  }, [cwd]);
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
@@ -153,7 +173,7 @@ export function ChatPage() {
     [handleSend]
   );
 
-  const sendDisabled = !input.trim() || sending || sessionPending;
+  const sendDisabled = !input.trim() || sending || sessionPending || !cwd;
   const statusLabel = sessionPending
     ? "会话启动中…"
     : sending
@@ -164,7 +184,7 @@ export function ChatPage() {
 
   return (
     <div className="flex h-full flex-col gap-4 overflow-hidden">
-      <PageHeader title="Chat" subtitle={`cwd: ${DEFAULT_CWD} · ${statusLabel}`} />
+      <PageHeader title="Chat" subtitle={`cwd: ${cwd ?? "解析中…"} · ${statusLabel}`} />
 
       <Card padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div
