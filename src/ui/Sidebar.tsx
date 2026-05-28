@@ -52,6 +52,7 @@ const NAV_SECTIONS: NavSection[] = [
       { to: "/", label: "首页", icon: Activity },
       { to: "/providers", label: "供应商", icon: Boxes },
       { to: "/sessions", label: "Session 会话", icon: MessageSquare },
+      { to: "/chat", label: "Chat", icon: MessageSquare },
     ],
   },
   {

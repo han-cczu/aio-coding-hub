@@ -8,6 +8,10 @@ const allowedRawTauriImportFiles = new Set([
   "services/desktop/updater.ts",
   "services/tauriInvoke.ts",
   "services/desktop/themeEvent.ts",
+  // M0 chat sidecar contract — bindings will be Specta-generated during the
+  // integration phase, after which the raw invoke calls will move to
+  // generated/bindings.ts and this entry can be removed.
+  "services/chat/chat.ts",
 ]);
 
 const allowedRawInvokeFiles = new Set(["services/tauriInvoke.ts", "services/desktop/updater.ts"]);

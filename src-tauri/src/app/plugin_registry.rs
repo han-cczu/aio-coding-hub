@@ -1,13 +1,15 @@
 //! Usage: Shared Tauri builder setup (managed state + plugin wiring).
 
 use super::{
-    app_state::DbInitState, gateway_state::GatewayState, resident, startup_state::StartupState,
+    app_state::DbInitState, chat_service::ChatState, gateway_state::GatewayState, resident,
+    startup_state::StartupState,
 };
 
 pub(crate) fn create_builder() -> tauri::Builder<tauri::Wry> {
     let builder = tauri::Builder::default()
         .manage(DbInitState::default())
         .manage(GatewayState::default())
+        .manage(ChatState::default())
         .manage(resident::ResidentState::default())
         .manage(StartupState::default())
         .manage(crate::app::heartbeat_watchdog::HeartbeatWatchdogState::default())

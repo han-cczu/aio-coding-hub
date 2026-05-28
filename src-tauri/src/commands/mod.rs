@@ -4,6 +4,7 @@
 //! Command names / args / return JSON shapes are considered a frozen contract.
 
 pub(crate) mod app;
+pub(crate) mod chat;
 pub(crate) mod claude_model_validation;
 pub(crate) mod cli_manager;
 pub(crate) mod cli_proxy;
@@ -34,6 +35,7 @@ pub(crate) mod workspaces;
 pub(crate) mod wsl;
 
 pub(crate) use app::*;
+pub(crate) use chat::*;
 pub(crate) use claude_model_validation::*;
 pub(crate) use cli_manager::*;
 pub(crate) use cli_proxy::*;

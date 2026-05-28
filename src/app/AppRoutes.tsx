@@ -5,6 +5,7 @@ import { AppLayout } from "../layout/AppLayout";
 import { HomePage } from "../pages/HomePage";
 import { Spinner } from "../ui/Spinner";
 
+const ChatPage = lazy(() => import("../pages/ChatPage").then((m) => ({ default: m.ChatPage })));
 const CliManagerPage = lazy(() =>
   import("../pages/CliManagerPage").then((m) => ({ default: m.CliManagerPage }))
 );
@@ -63,6 +64,7 @@ export function AppRoutes() {
     <Routes>
       <Route element={<AppLayout />}>
         <Route index element={<HomePage />} />
+        <Route path="/chat" element={renderLazyPage(ChatPage)} />
         <Route path="/providers" element={renderLazyPage(ProvidersPage)} />
         <Route path="/sessions" element={renderLazyPage(SessionsPage)} />
         <Route path="/sessions/:source/:projectId" element={renderLazyPage(SessionsProjectPage)} />
