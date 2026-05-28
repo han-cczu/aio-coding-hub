@@ -4,10 +4,14 @@
 // session on unmount.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { homeDir } from "@tauri-apps/api/path";
 import { toast } from "sonner";
 import { useChatEventStream } from "../hooks/useChatEventStream";
-import { chatCloseSession, chatCreateSession, chatSendMessage } from "../services/chat/chat";
+import {
+  chatCloseSession,
+  chatCreateSession,
+  chatDefaultCwd,
+  chatSendMessage,
+} from "../services/chat/chat";
 import { logToConsole } from "../services/consoleLog";
 import {
   appendUserMessage,
@@ -82,13 +86,16 @@ export function ChatPage() {
 
   useChatEventStream(sessionId);
 
-  // Resolve cwd via Tauri's homeDir at mount. While null, the send button is
-  // disabled and the header shows "解析中…". Failure is surfaced via the chat
-  // error banner so the user knows the issue is not their input.
+  // Resolve cwd via the backend `chat_default_cwd` command. We cannot call
+  // `@tauri-apps/api/path` `homeDir()` directly: AIO's capabilities/main-core
+  // intentionally withholds `core:path:*` permissions from the webview. The
+  // backend uses `crate::app_paths::home_dir()` and returns an absolute
+  // path. While null, the send button stays disabled and the header shows
+  // "解析中…"; failure surfaces through the chat error banner.
   const [cwd, setCwd] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    homeDir()
+    chatDefaultCwd()
       .then((dir) => {
         if (!cancelled) setCwd(dir);
       })

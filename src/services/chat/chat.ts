@@ -54,6 +54,10 @@ export function chatErrorEventName(sessionId: string): string {
 // Once Specta bindings are regenerated (CI / non-Windows host), these
 // callers can migrate to `commands.chat*` for full type safety.
 
+export async function chatDefaultCwd(): Promise<string> {
+  return invoke<string>("chat_default_cwd");
+}
+
 export async function chatCreateSession(cwd: string): Promise<string> {
   return invoke<string>("chat_create_session", { input: { cwd } });
 }

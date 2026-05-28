@@ -224,6 +224,18 @@ pub(crate) async fn close_session(service: Arc<ChatService>, session_id: String)
     send_result
 }
 
+/// Resolve a sensible default cwd for a new chat session.
+///
+/// Returns the user's home directory as an absolute path. The frontend
+/// calls this through the `chat_default_cwd` IPC command — AIO does not
+/// expose the Tauri `core:path:*` permissions to the webview by design
+/// (see `capabilities/main-core.json`), so all path resolution happens
+/// in Rust. M1 will replace this with a per-session cwd picker.
+pub(crate) fn default_cwd<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<String> {
+    let home = crate::app_paths::home_dir(app)?;
+    Ok(home.to_string_lossy().into_owned())
+}
+
 async fn ensure_sidecar<R: tauri::Runtime>(
     service: &Arc<ChatService>,
     app: &tauri::AppHandle<R>,

@@ -31,6 +31,16 @@ pub(crate) struct ChatCloseSessionInput {
     pub session_id: String,
 }
 
+/// Resolve a default cwd for new chat sessions (currently the user's
+/// home directory). The frontend calls this because AIO deliberately
+/// withholds the Tauri `core:path:*` permissions from the webview, so
+/// `homeDir()` etc. cannot run there.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn chat_default_cwd(app: tauri::AppHandle) -> Result<String, String> {
+    chat_service::default_cwd(&app).map_err(Into::into)
+}
+
 /// Create a new chat session bound to an absolute, existing `cwd`.
 ///
 /// Returns the freshly generated session id (UUID v4) once the sidecar
