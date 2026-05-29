@@ -1,10 +1,11 @@
-// Usage: M0 chat page. One session per page load — no session tabs, no cwd
-// picker. Permission-mode, launcher, and model selectors sit above the
-// transcript (all fixed once the session exists). Calls `chat_create_session`
-// on first send, streams assistant text via `useChatEventStream`, and closes
-// the session on unmount.
+// Usage: M0 chat page. One session per page load — no session tabs. A cwd
+// picker (header) plus permission-mode, launcher, and model selectors sit
+// above the transcript (all fixed once the session exists). Calls
+// `chat_create_session` on first send, streams assistant text via
+// `useChatEventStream`, and closes the session on unmount.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { FolderOpen } from "lucide-react";
 import { toast } from "sonner";
 import { useChatEventStream } from "../hooks/useChatEventStream";
 import {
@@ -13,6 +14,7 @@ import {
   chatDefaultCwd,
   chatSendMessage,
 } from "../services/chat/chat";
+import { openDesktopSinglePath } from "../services/desktop/dialog";
 import { logToConsole } from "../services/consoleLog";
 import {
   appendUserMessage,
@@ -105,12 +107,14 @@ export function ChatPage() {
 
   useChatEventStream(sessionId);
 
-  // Resolve cwd via the backend `chat_default_cwd` command. We cannot call
-  // `@tauri-apps/api/path` `homeDir()` directly: AIO's capabilities/main-core
-  // intentionally withholds `core:path:*` permissions from the webview. The
-  // backend uses `crate::app_paths::home_dir()` and returns an absolute
-  // path. While null, the send button stays disabled and the header shows
-  // "解析中…"; failure surfaces through the chat error banner.
+  // Resolve the *default* cwd via the backend `chat_default_cwd` command (the
+  // user's home). We cannot call `@tauri-apps/api/path` `homeDir()` directly:
+  // AIO's capabilities/main-core intentionally withholds `core:path:*`
+  // permissions from the webview. The backend uses
+  // `crate::app_paths::home_dir()` and returns an absolute path. While null,
+  // the send button stays disabled and the header shows "解析中…"; failure
+  // surfaces through the chat error banner. The "选择目录" header button lets
+  // the user override this before the session is created.
   const [cwd, setCwd] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
@@ -152,6 +156,11 @@ export function ChatPage() {
     node.scrollTop = node.scrollHeight;
   }, [messages]);
 
+  // cwd, permission mode, launcher, and model are fixed for the session
+  // lifetime (M0): lock the cwd picker + selectors once a session exists or is
+  // being created. Changing any of them means starting a new session.
+  const sessionLocked = sessionId !== null || sessionPending;
+
   const ensureSession = useCallback(async (): Promise<string> => {
     if (activeSessionIdRef.current) return activeSessionIdRef.current;
     if (!cwd) {
@@ -179,6 +188,33 @@ export function ChatPage() {
       throw error;
     }
   }, [cwd, permissionMode, launcher, model, modelCustom]);
+
+  // Let the user pick the session's working directory via the native folder
+  // picker (routed through AIO's `openDesktopSinglePath` wrapper — the webview
+  // is not granted the Tauri dialog permission directly). Only effective
+  // before the session is created; the button is disabled afterwards. The
+  // backend re-validates the path (`validate_cwd`) on session create, so an
+  // illegal pick (e.g. the AIO data dir) surfaces via the error banner there.
+  const handlePickCwd = useCallback(async () => {
+    if (sessionLocked) return;
+    try {
+      const picked = await openDesktopSinglePath({
+        directory: true,
+        multiple: false,
+        title: "选择工作目录",
+        defaultPath: cwd ?? undefined,
+      });
+      if (picked) {
+        setCwd(picked);
+        // Clear any stale "无法解析默认工作目录" / CHAT_INVALID_CWD banner so the
+        // user gets a clean slate to retry with the new directory.
+        setChatError(null);
+      }
+    } catch (error) {
+      logToConsole("error", "打开工作目录选择器失败", { error: String(error) }, "chat:page");
+      toast("打开目录选择器失败，请稍后重试");
+    }
+  }, [cwd, sessionLocked]);
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
@@ -209,9 +245,6 @@ export function ChatPage() {
   );
 
   const sendDisabled = !input.trim() || sending || sessionPending || !cwd;
-  // Permission mode, launcher, and model are fixed for the session lifetime
-  // (M0): lock the selectors as soon as a session exists or is being created.
-  const sessionLocked = sessionId !== null || sessionPending;
   const statusLabel = sessionPending
     ? "会话启动中…"
     : sending
@@ -222,7 +255,23 @@ export function ChatPage() {
 
   return (
     <div className="flex h-full flex-col gap-4 overflow-hidden">
-      <PageHeader title="Chat" subtitle={`cwd: ${cwd ?? "解析中…"} · ${statusLabel}`} />
+      <PageHeader
+        title="Chat"
+        subtitle={`cwd: ${cwd ?? "解析中…"} · ${statusLabel}`}
+        actions={
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handlePickCwd}
+            disabled={sessionLocked}
+            // Locked once a session exists: changing cwd means a new session.
+            title={sessionLocked ? "会话已创建，工作目录不可更改" : "选择工作目录"}
+          >
+            <FolderOpen className="h-4 w-4" aria-hidden="true" />
+            选择目录
+          </Button>
+        }
+      />
 
       {/* Permission mode + launcher + model sit side-by-side. All are fixed
           once the session is created (M0), so they share the lock condition. */}
