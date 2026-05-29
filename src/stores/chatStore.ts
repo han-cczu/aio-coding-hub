@@ -5,7 +5,12 @@
 
 import { useSyncExternalStore } from "react";
 import { emitListenerSnapshot } from "../utils/listeners";
-import type { ChatPermissionMode, ChatSdkContentBlock, ChatSdkEvent } from "../services/chat/chat";
+import type {
+  ChatPermissionMode,
+  ChatSdkContentBlock,
+  ChatSdkEvent,
+  ChatSlashCommand,
+} from "../services/chat/chat";
 
 export type ChatRole = "user" | "assistant";
 
@@ -51,6 +56,40 @@ export function resolveChatModel(preset: ChatModelPreset, custom: string): strin
   return preset;
 }
 
+/**
+ * Merge the two slash-command sources into one deduped, ordered list for the
+ * autocomplete palette:
+ *   - `backend` — best-effort list from `chat_list_slash_commands` (rich:
+ *     carries description + source; available before the session starts).
+ *   - `sessionNames` — bare command names from the session's `system/init`
+ *     event (authoritative once connected; may include commands the backend
+ *     could not scan, e.g. MCP commands).
+ *
+ * Dedup is by `name`, first occurrence wins. Backend entries come first (so
+ * their description/source metadata is preferred and the curated ordering —
+ * builtin, skill, command — is kept); session-only names are appended with a
+ * neutral `builtin` badge since we have no metadata for them.
+ */
+export function mergeSlashCommands(
+  backend: ChatSlashCommand[],
+  sessionNames: string[]
+): ChatSlashCommand[] {
+  const byName = new Map<string, ChatSlashCommand>();
+  for (const cmd of backend) {
+    if (cmd && typeof cmd.name === "string" && cmd.name && !byName.has(cmd.name)) {
+      byName.set(cmd.name, cmd);
+    }
+  }
+  for (const raw of sessionNames) {
+    // Tolerate a stray leading slash from the session payload just in case.
+    const name = typeof raw === "string" ? raw.replace(/^\/+/, "") : "";
+    if (name && !byName.has(name)) {
+      byName.set(name, { name, source: "builtin" });
+    }
+  }
+  return [...byName.values()];
+}
+
 export type ChatMessage = {
   /** Local monotonically increasing id; not the SDK message id. */
   id: string;
@@ -90,6 +129,17 @@ export type ChatStoreSnapshot = {
   model: ChatModelPreset;
   /** Free-text full model name, used only when `model === "custom"`. */
   modelCustom: string;
+  /**
+   * Best-effort slash commands from `chat_list_slash_commands` (rich metadata,
+   * available before the session starts). Combine with `slashCommandNames` via
+   * {@link mergeSlashCommands} for the palette.
+   */
+  slashCommandsBackend: ChatSlashCommand[];
+  /**
+   * Authoritative slash command names from the session's `system/init` event
+   * (bare names). Empty until the session emits init.
+   */
+  slashCommandNames: string[];
 };
 
 type Listener = () => void;
@@ -106,6 +156,8 @@ const INITIAL_STATE: ChatStoreState = {
   launcher: DEFAULT_CHAT_LAUNCHER,
   model: DEFAULT_CHAT_MODEL_PRESET,
   modelCustom: "",
+  slashCommandsBackend: [],
+  slashCommandNames: [],
 };
 
 let state: ChatStoreState = INITIAL_STATE;
@@ -194,6 +246,14 @@ export function setChatModel(model: ChatModelPreset) {
 export function setChatModelCustom(modelCustom: string) {
   if (state.modelCustom === modelCustom) return;
   setState({ ...state, modelCustom });
+}
+
+/**
+ * Store the best-effort slash command list fetched from the backend for the
+ * current cwd. Replaces any previous list (re-fetched when cwd changes).
+ */
+export function setChatSlashCommandsBackend(commands: ChatSlashCommand[]) {
+  setState({ ...state, slashCommandsBackend: commands });
 }
 
 /**
@@ -307,6 +367,14 @@ function finalizeStreamingAssistant(messages: ChatMessage[]): ChatMessage[] {
   return next;
 }
 
+function arraysEqual(a: string[], b: string[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i]) return false;
+  }
+  return true;
+}
+
 /**
  * Ingest a Claude Agent SDK event forwarded over `chat-event-{session_id}`.
  *
@@ -318,9 +386,11 @@ function finalizeStreamingAssistant(messages: ChatMessage[]): ChatMessage[] {
  *     with the authoritative full value, correcting any delta drift. We do
  *     NOT append here — appending after delta accumulation would double the
  *     text ("你好你好").
+ *   - `system` / `init`: capture the authoritative `slash_commands` list for
+ *     the `/` autocomplete palette.
  *   - `result` / `result_end`: end the turn (`streaming=false`, `sending` off).
  *
- * Everything else (system init/status, rate_limit_event, tool_use snapshots,
+ * Everything else (system status, rate_limit_event, tool_use snapshots,
  * message_start/stop partials, …) is intentionally ignored in M0.
  */
 export function ingestChatEvent(event: ChatSdkEvent | null | undefined) {
@@ -334,6 +404,18 @@ export function ingestChatEvent(event: ChatSdkEvent | null | undefined) {
       ...state,
       messages: appendTextToAssistant(state.messages, delta),
     });
+    return;
+  }
+
+  if (type === "system" && event.subtype === "init") {
+    // Authoritative slash command set for this session. Only update when it
+    // actually changes to avoid spurious re-renders on repeated init events.
+    const names = Array.isArray(event.slash_commands)
+      ? event.slash_commands.filter((n): n is string => typeof n === "string")
+      : [];
+    if (names.length > 0 && !arraysEqual(names, state.slashCommandNames)) {
+      setState({ ...state, slashCommandNames: names });
+    }
     return;
   }
 

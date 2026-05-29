@@ -201,6 +201,7 @@ macro_rules! generated_command_registry {
             chat_create_session => crate::commands::chat::chat_create_session,
             chat_send_message => crate::commands::chat::chat_send_message,
             chat_close_session => crate::commands::chat::chat_close_session,
+            chat_list_slash_commands => crate::commands::chat::chat_list_slash_commands,
             // ── workspaces ──
             workspaces_list => crate::commands::workspaces::workspaces_list,
             workspace_create => crate::commands::workspaces::workspace_create,

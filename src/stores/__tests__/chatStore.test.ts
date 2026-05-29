@@ -339,4 +339,69 @@ describe("stores/chatStore", () => {
     expect(result.current.sessionPending).toBe(false);
     expect(result.current.sessionId).toBe("sess-1");
   });
+
+  it("mergeSlashCommands dedupes by name (backend first) and appends session-only names", async () => {
+    const { mergeSlashCommands } = await importFreshChatStore();
+
+    const backend = [
+      { name: "clear", description: "清空", source: "builtin" as const },
+      { name: "deploy", description: "部署", source: "command" as const },
+    ];
+    // system/init confirms `clear`, adds `mcp__foo` (backend missed it), and
+    // repeats `deploy` (dup must not produce a second row).
+    const sessionNames = ["clear", "mcp__foo", "deploy"];
+
+    const merged = mergeSlashCommands(backend, sessionNames);
+
+    // Order: backend entries first (curated), then session-only extras.
+    expect(merged.map((c) => c.name)).toEqual(["clear", "deploy", "mcp__foo"]);
+    // Backend metadata is preferred for shared names.
+    expect(merged[0]).toMatchObject({ name: "clear", description: "清空", source: "builtin" });
+    // Session-only entry gets the neutral builtin badge and no description.
+    expect(merged[2]).toMatchObject({ name: "mcp__foo", source: "builtin" });
+    expect(merged[2].description).toBeUndefined();
+  });
+
+  it("mergeSlashCommands tolerates a stray leading slash and blanks in session names", async () => {
+    const { mergeSlashCommands } = await importFreshChatStore();
+    const merged = mergeSlashCommands([], ["/clear", "", "compact"]);
+    expect(merged.map((c) => c.name)).toEqual(["clear", "compact"]);
+  });
+
+  it("captures slash_commands from a system/init event and ignores other system events", async () => {
+    const { useChatStore, ingestChatEvent, resetChatStore } = await importFreshChatStore();
+    resetChatStore();
+
+    const { result } = renderHook(() => useChatStore());
+    expect(result.current.slashCommandNames).toEqual([]);
+
+    act(() => {
+      ingestChatEvent({
+        type: "system",
+        subtype: "init",
+        slash_commands: ["clear", "compact", "context"],
+      });
+    });
+    expect(result.current.slashCommandNames).toEqual(["clear", "compact", "context"]);
+
+    // A non-init system event must not clobber the captured list.
+    act(() => {
+      ingestChatEvent({ type: "system", subtype: "status" });
+    });
+    expect(result.current.slashCommandNames).toEqual(["clear", "compact", "context"]);
+  });
+
+  it("setChatSlashCommandsBackend stores the backend list", async () => {
+    const { useChatStore, setChatSlashCommandsBackend, resetChatStore } =
+      await importFreshChatStore();
+    resetChatStore();
+
+    const { result } = renderHook(() => useChatStore());
+    expect(result.current.slashCommandsBackend).toEqual([]);
+
+    act(() => {
+      setChatSlashCommandsBackend([{ name: "usage", source: "builtin" }]);
+    });
+    expect(result.current.slashCommandsBackend).toEqual([{ name: "usage", source: "builtin" }]);
+  });
 });

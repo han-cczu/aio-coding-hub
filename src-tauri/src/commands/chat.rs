@@ -48,6 +48,27 @@ pub(crate) struct ChatCloseSessionInput {
     pub session_id: String,
 }
 
+#[derive(Debug, Clone, serde::Deserialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatListSlashCommandsInput {
+    /// Project root used to discover `<cwd>/.claude/commands/*.md`. Pass the
+    /// session's cwd (or the default cwd) so project-local commands surface.
+    pub cwd: String,
+}
+
+/// A slash-command candidate for the frontend `/` autocomplete.
+///
+/// `source` is `"builtin"`, `"skill"`, or `"command"`. The list is
+/// best-effort (see [`chat_service::list_slash_commands`]); the frontend
+/// re-validates against the session's authoritative list once it starts.
+#[derive(Debug, Clone, serde::Serialize, specta::Type)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ChatSlashCommand {
+    pub name: String,
+    pub description: Option<String>,
+    pub source: String,
+}
+
 /// Resolve a default cwd for new chat sessions (currently the user's
 /// home directory). The frontend calls this because AIO deliberately
 /// withholds the Tauri `core:path:*` permissions from the webview, so
@@ -110,4 +131,27 @@ pub(crate) async fn chat_close_session(
     chat_service::close_session(chat_state.service(), input.session_id)
         .await
         .map_err(Into::into)
+}
+
+/// List slash-command candidates for the `/` autocomplete, merging built-ins,
+/// installed skills, and custom commands (user + `<cwd>/.claude/commands`).
+///
+/// Best-effort: never errors on a missing/unreadable source — it returns
+/// whatever it can gather (always at least the built-ins). `Ok` is therefore
+/// the only realistic outcome; the `Result` is kept for IPC symmetry.
+#[tauri::command]
+#[specta::specta]
+pub(crate) async fn chat_list_slash_commands(
+    app: tauri::AppHandle,
+    input: ChatListSlashCommandsInput,
+) -> Result<Vec<ChatSlashCommand>, String> {
+    let commands = chat_service::list_slash_commands(&app, &input.cwd)
+        .into_iter()
+        .map(|c| ChatSlashCommand {
+            name: c.name,
+            description: c.description,
+            source: c.source.to_string(),
+        })
+        .collect();
+    Ok(commands)
 }

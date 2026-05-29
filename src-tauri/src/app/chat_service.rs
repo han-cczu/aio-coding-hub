@@ -191,6 +191,210 @@ pub(crate) fn default_cwd<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppRe
     Ok(home.to_string_lossy().into_owned())
 }
 
+/// One slash-command candidate surfaced to the frontend's `/` autocomplete.
+///
+/// `source` is one of `"builtin"`, `"skill"`, or `"command"`. The command
+/// layer maps this onto the Specta-annotated IPC type.
+pub(crate) struct SlashCommand {
+    pub name: String,
+    pub description: Option<String>,
+    pub source: &'static str,
+}
+
+/// Max bytes read from a `SKILL.md` / command `.md` when sniffing its
+/// frontmatter. Mirrors the skills module's `SKILL_MD_MAX_BYTES`.
+const SLASH_MD_MAX_BYTES: usize = 256 * 1024;
+/// Cap on directory entries scanned per slash-command source, so a
+/// pathological directory cannot stall the picker.
+const SLASH_DIR_ENTRY_MAX: usize = 1024;
+
+/// Best-effort, cwd-aware list of slash commands a headless `claude` is
+/// likely to accept, for the frontend `/` autocomplete *before* a session
+/// exists. Three sources are merged, de-duplicated by name (first wins):
+///
+/// 1. A hardcoded set of built-ins known to work headless.
+/// 2. Installed skills under `~/.claude/skills/<name>/SKILL.md`.
+/// 3. Custom commands under `~/.claude/commands/*.md` and
+///    `<cwd>/.claude/commands/*.md`.
+///
+/// This is intentionally approximate — any source that is missing or
+/// unreadable is silently skipped, and the frontend re-validates against the
+/// authoritative `system`/`init` list once the session starts. Always
+/// returns at least the built-ins.
+pub(crate) fn list_slash_commands<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    cwd: &str,
+) -> Vec<SlashCommand> {
+    let mut out = builtin_slash_commands();
+
+    if let Ok(home) = crate::infra::app_paths::home_dir(app) {
+        let claude_dir = home.join(".claude");
+        out.extend(scan_skill_dir(&claude_dir.join("skills")));
+        out.extend(scan_command_dir(&claude_dir.join("commands")));
+    }
+
+    let cwd = cwd.trim();
+    if !cwd.is_empty() {
+        let project_commands = Path::new(cwd).join(".claude").join("commands");
+        out.extend(scan_command_dir(&project_commands));
+    }
+
+    dedup_by_name(out)
+}
+
+/// Built-in slash commands that work in headless (`--print` / stream-json)
+/// mode. Deliberately excludes `model` / `effort` / `permission-mode`: those
+/// cannot be switched dynamically headless and the GUI exposes dedicated
+/// selectors for them already.
+fn builtin_slash_commands() -> Vec<SlashCommand> {
+    [
+        ("clear", "清空当前会话上下文，开始新对话"),
+        ("compact", "压缩对话历史以释放上下文窗口"),
+        ("context", "查看当前上下文占用情况"),
+        ("usage", "查看本次会话的用量与额度"),
+    ]
+    .into_iter()
+    .map(|(name, description)| SlashCommand {
+        name: name.to_string(),
+        description: Some(description.to_string()),
+        source: "builtin",
+    })
+    .collect()
+}
+
+/// Scan immediate subdirectories of `skills_root`, listing each that contains
+/// a `SKILL.md` — directory name as the command name, frontmatter
+/// `description` (if any) as the description. Directories without a `SKILL.md`
+/// are not skills and are skipped. Returns an empty vec if `skills_root` is
+/// absent or unreadable.
+fn scan_skill_dir(skills_root: &Path) -> Vec<SlashCommand> {
+    let Ok(entries) = std::fs::read_dir(skills_root) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for entry in entries.flatten().take(SLASH_DIR_ENTRY_MAX) {
+        if !entry.file_type().map(|t| t.is_dir()).unwrap_or(false) {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.is_empty() || name.starts_with('.') {
+            continue;
+        }
+        let skill_md = entry.path().join("SKILL.md");
+        if !skill_md.is_file() {
+            continue;
+        }
+        out.push(SlashCommand {
+            name,
+            description: read_frontmatter_description(&skill_md),
+            source: "skill",
+        });
+    }
+    out
+}
+
+/// Scan `commands_root` for top-level `*.md` files, taking the file stem as
+/// the command name and the frontmatter `description`. Returns an empty vec
+/// if the directory is absent or unreadable.
+fn scan_command_dir(commands_root: &Path) -> Vec<SlashCommand> {
+    let Ok(entries) = std::fs::read_dir(commands_root) else {
+        return Vec::new();
+    };
+
+    let mut out = Vec::new();
+    for entry in entries.flatten().take(SLASH_DIR_ENTRY_MAX) {
+        let path = entry.path();
+        if !entry.file_type().map(|t| t.is_file()).unwrap_or(false) {
+            continue;
+        }
+        if path.extension().and_then(|e| e.to_str()) != Some("md") {
+            continue;
+        }
+        let Some(stem) = path.file_stem().map(|s| s.to_string_lossy().into_owned()) else {
+            continue;
+        };
+        if stem.is_empty() {
+            continue;
+        }
+        let description = read_frontmatter_description(&path);
+        out.push(SlashCommand {
+            name: stem,
+            description,
+            source: "command",
+        });
+    }
+    out
+}
+
+/// Read a markdown file (size-capped) and extract its YAML frontmatter
+/// `description`, if any. Any read / decode / parse failure yields `None`
+/// (the command stays listed, just without a description).
+fn read_frontmatter_description(path: &Path) -> Option<String> {
+    let bytes = crate::shared::fs::read_optional_file_with_max_len(path, SLASH_MD_MAX_BYTES)
+        .ok()
+        .flatten()?;
+    let text = String::from_utf8(bytes).ok()?;
+    frontmatter_description(&text)
+}
+
+/// Extract `description` from a leading `---`-delimited YAML frontmatter
+/// block. Returns `None` when there is no frontmatter or no (non-blank)
+/// `description` key. Only the simple `key: value` form is supported (enough
+/// for SKILL.md / command frontmatter); quotes are stripped.
+fn frontmatter_description(text: &str) -> Option<String> {
+    let text = text.trim_start();
+    let mut lines = text.lines();
+    if lines.next()?.trim() != "---" {
+        return None;
+    }
+    for line in lines {
+        let line = line.trim();
+        if line == "---" {
+            break;
+        }
+        let Some((key, value)) = line.split_once(':') else {
+            continue;
+        };
+        if key.trim() != "description" {
+            continue;
+        }
+        let value = strip_matching_quotes(value.trim()).trim();
+        if value.is_empty() {
+            return None;
+        }
+        return Some(value.to_string());
+    }
+    None
+}
+
+/// Strip a single pair of matching surrounding quotes (`"` or `'`).
+fn strip_matching_quotes(s: &str) -> &str {
+    let bytes = s.as_bytes();
+    if bytes.len() >= 2 {
+        let first = bytes[0];
+        let last = bytes[bytes.len() - 1];
+        if (first == b'"' && last == b'"') || (first == b'\'' && last == b'\'') {
+            return &s[1..s.len() - 1];
+        }
+    }
+    s
+}
+
+/// De-duplicate by command name, keeping the first occurrence (so built-ins
+/// win over skills win over custom commands, and user commands win over
+/// project commands). Preserves insertion order.
+fn dedup_by_name(commands: Vec<SlashCommand>) -> Vec<SlashCommand> {
+    let mut seen = std::collections::HashSet::new();
+    let mut out = Vec::with_capacity(commands.len());
+    for command in commands {
+        if seen.insert(command.name.clone()) {
+            out.push(command);
+        }
+    }
+    out
+}
+
 /// Resolve the launcher used to start a chat session's `claude` process.
 ///
 /// `preferred` lets the frontend force a specific launcher (see
@@ -515,6 +719,123 @@ mod tests {
             normalize_model(Some("opus".to_string())),
             Some("opus".to_string())
         );
+    }
+
+    #[test]
+    fn builtin_slash_commands_is_non_empty_and_tagged_builtin() {
+        let builtins = builtin_slash_commands();
+        assert!(!builtins.is_empty(), "builtin list must not be empty");
+        assert!(builtins.iter().all(|c| c.source == "builtin"));
+        assert!(builtins.iter().all(|c| c.description.is_some()));
+        // The headless-safe set must NOT advertise dynamic-switch commands.
+        let names: Vec<&str> = builtins.iter().map(|c| c.name.as_str()).collect();
+        assert!(names.contains(&"clear"));
+        assert!(!names.contains(&"model"));
+        assert!(!names.contains(&"permission-mode"));
+    }
+
+    #[test]
+    fn frontmatter_description_parses_strips_quotes_and_handles_edge_cases() {
+        // Happy path with double quotes.
+        assert_eq!(
+            frontmatter_description("---\nname: x\ndescription: \"do a thing\"\n---\nbody"),
+            Some("do a thing".to_string())
+        );
+        // Single quotes + extra keys + comment-ish lines.
+        assert_eq!(
+            frontmatter_description("---\ndescription: 'hi there'\nother: 1\n---\n"),
+            Some("hi there".to_string())
+        );
+        // No frontmatter at all.
+        assert_eq!(frontmatter_description("# just markdown\n"), None);
+        // Frontmatter present but no description key.
+        assert_eq!(frontmatter_description("---\nname: only\n---\n"), None);
+        // Blank description is treated as absent.
+        assert_eq!(frontmatter_description("---\ndescription:   \n---\n"), None);
+    }
+
+    #[test]
+    fn scan_command_dir_missing_dir_returns_empty_without_panic() {
+        let missing = Path::new("/nope-no-such-commands-dir-xyz-12345");
+        assert!(scan_command_dir(missing).is_empty());
+    }
+
+    #[test]
+    fn scan_skill_dir_missing_dir_returns_empty_without_panic() {
+        let missing = Path::new("/nope-no-such-skills-dir-xyz-12345");
+        assert!(scan_skill_dir(missing).is_empty());
+    }
+
+    #[test]
+    fn scan_command_dir_reads_md_files_with_and_without_frontmatter() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(
+            dir.path().join("review.md"),
+            "---\ndescription: Review code\n---\nPrompt body",
+        )
+        .expect("write review.md");
+        std::fs::write(dir.path().join("plain.md"), "no frontmatter here").expect("write plain.md");
+        // Non-markdown files must be ignored.
+        std::fs::write(dir.path().join("notes.txt"), "ignore me").expect("write notes.txt");
+
+        let mut cmds = scan_command_dir(dir.path());
+        cmds.sort_by(|a, b| a.name.cmp(&b.name));
+
+        assert_eq!(cmds.len(), 2, "only the two .md files");
+        assert_eq!(cmds[0].name, "plain");
+        assert_eq!(cmds[0].description, None);
+        assert_eq!(cmds[0].source, "command");
+        assert_eq!(cmds[1].name, "review");
+        assert_eq!(cmds[1].description, Some("Review code".to_string()));
+    }
+
+    #[test]
+    fn scan_skill_dir_requires_skill_md_and_uses_dir_name() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let skill = dir.path().join("my-skill");
+        std::fs::create_dir_all(&skill).expect("create skill dir");
+        std::fs::write(
+            skill.join("SKILL.md"),
+            "---\nname: ignored-name\ndescription: A handy skill\n---\n",
+        )
+        .expect("write SKILL.md");
+        // A directory WITHOUT SKILL.md is not a skill and must be skipped.
+        std::fs::create_dir_all(dir.path().join("bare-skill")).expect("create bare skill dir");
+
+        let skills = scan_skill_dir(dir.path());
+
+        assert_eq!(skills.len(), 1, "only the dir with SKILL.md");
+        assert_eq!(skills[0].name, "my-skill");
+        // Name comes from the directory, not the frontmatter `name`.
+        assert_eq!(skills[0].description, Some("A handy skill".to_string()));
+        assert_eq!(skills[0].source, "skill");
+    }
+
+    #[test]
+    fn dedup_by_name_keeps_first_occurrence() {
+        let input = vec![
+            SlashCommand {
+                name: "dup".to_string(),
+                description: Some("first".to_string()),
+                source: "builtin",
+            },
+            SlashCommand {
+                name: "dup".to_string(),
+                description: Some("second".to_string()),
+                source: "command",
+            },
+            SlashCommand {
+                name: "unique".to_string(),
+                description: None,
+                source: "skill",
+            },
+        ];
+        let out = dedup_by_name(input);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].name, "dup");
+        assert_eq!(out[0].source, "builtin");
+        assert_eq!(out[0].description, Some("first".to_string()));
+        assert_eq!(out[1].name, "unique");
     }
 
     #[test]

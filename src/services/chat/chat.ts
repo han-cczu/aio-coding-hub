@@ -18,9 +18,17 @@ import { invoke } from "@tauri-apps/api/core";
  */
 export type ChatSdkEvent = {
   type?: string;
+  /** Discriminator for `type:"system"` events (e.g. `"init"`, `"status"`). */
+  subtype?: string;
   message?: ChatSdkAssistantMessage;
   /** Present on `type:"stream_event"` partials (Anthropic streaming envelope). */
   event?: ChatSdkStreamEvent;
+  /**
+   * Present on `type:"system"`, `subtype:"init"`: the authoritative list of
+   * slash command names available to this session (bare names, no leading
+   * `/`). Empirically ~28 entries; supplements the best-effort backend list.
+   */
+  slash_commands?: string[];
   [key: string]: unknown;
 };
 
@@ -111,6 +119,25 @@ export type ChatCreateSessionOptions = {
   disallowedTools?: string[];
 };
 
+/**
+ * Origin of a slash command, used for the palette source badge:
+ *   - `builtin` — ships with claude (e.g. `/clear`, `/compact`).
+ *   - `skill`   — an installed skill (`~/.claude/skills/*`).
+ *   - `command` — a user/project custom command (`.claude/commands/*.md`).
+ */
+export type ChatSlashCommandSource = "builtin" | "skill" | "command";
+
+/**
+ * A slash command candidate returned by `chat_list_slash_commands`. Matches
+ * the frozen backend contract (`{ name, description?, source }`). `name` has
+ * no leading `/`.
+ */
+export type ChatSlashCommand = {
+  name: string;
+  description?: string | null;
+  source: ChatSlashCommandSource;
+};
+
 export function chatEventName(sessionId: string): string {
   return `chat-event-${sessionId}`;
 }
@@ -131,6 +158,16 @@ export function chatErrorEventName(sessionId: string): string {
 
 export async function chatDefaultCwd(): Promise<string> {
   return invoke<string>("chat_default_cwd");
+}
+
+/**
+ * Best-effort enumeration of slash commands available for `cwd`, used to seed
+ * the `/` autocomplete palette *before* a session exists. The list is
+ * approximate (built-ins + skills + custom command files); the session's
+ * `system/init` event provides the authoritative set once connected.
+ */
+export async function chatListSlashCommands(cwd: string): Promise<ChatSlashCommand[]> {
+  return invoke<ChatSlashCommand[]>("chat_list_slash_commands", { input: { cwd } });
 }
 
 export async function chatCreateSession(opts: ChatCreateSessionOptions): Promise<string> {

@@ -4,7 +4,7 @@
 // `chat_create_session` on first send, streams assistant text via
 // `useChatEventStream`, and closes the session on unmount.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FolderOpen } from "lucide-react";
 import { toast } from "sonner";
 import { useChatEventStream } from "../hooks/useChatEventStream";
@@ -12,12 +12,14 @@ import {
   chatCloseSession,
   chatCreateSession,
   chatDefaultCwd,
+  chatListSlashCommands,
   chatSendMessage,
 } from "../services/chat/chat";
 import { openDesktopSinglePath } from "../services/desktop/dialog";
 import { logToConsole } from "../services/consoleLog";
 import {
   appendUserMessage,
+  mergeSlashCommands,
   resetChatStore,
   resolveChatModel,
   setChatError,
@@ -27,22 +29,29 @@ import {
   setChatPermissionMode,
   setChatSessionId,
   setChatSessionPending,
+  setChatSlashCommandsBackend,
   useChatStore,
   type ChatMessage,
 } from "../stores/chatStore";
 import { ChatLauncherSelector } from "../components/chat/ChatLauncherSelector";
 import { ChatModelSelector } from "../components/chat/ChatModelSelector";
 import { ChatPermissionModeSelector } from "../components/chat/ChatPermissionModeSelector";
+import {
+  ChatSlashCommandPalette,
+  filterSlashCommands,
+  slashQueryFromInput,
+} from "../components/chat/ChatSlashCommandPalette";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { PageHeader } from "../ui/PageHeader";
 import { Textarea } from "../ui/Textarea";
 import { cn } from "../utils/cn";
 
-// M0 resolves the default cwd to the user's home directory at mount time.
+// M0 resolves the default cwd to the user's home directory at mount time; the
+// "选择目录" header button lets the user override it before the session starts.
 // The backend rejects relative paths and anything inside the AIO data dir
-// (`validate_cwd` in app/chat_service.rs), so a bare "." would 100% fail
-// `CHAT_INVALID_CWD` on first send. The M1 cwd picker will replace this.
+// (`validate_cwd` in app/chat_service.rs), surfacing `CHAT_INVALID_CWD` on the
+// create-session call, which the chat error banner shows.
 
 function formatErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -94,6 +103,8 @@ export function ChatPage() {
     launcher,
     model,
     modelCustom,
+    slashCommandsBackend,
+    slashCommandNames,
   } = useChatStore();
   const [input, setInput] = useState("");
   // Track the latest sessionId via a ref so the unmount cleanup picks up
@@ -104,6 +115,9 @@ export function ChatPage() {
   }, [sessionId]);
 
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  // Highlighted row in the slash palette; clamped to the filtered list length.
+  const [slashActiveIndex, setSlashActiveIndex] = useState(0);
 
   useChatEventStream(sessionId);
 
@@ -129,6 +143,25 @@ export function ChatPage() {
       cancelled = true;
     };
   }, []);
+
+  // Seed the slash-command palette with the backend's best-effort list for the
+  // current cwd. Re-fetched whenever cwd changes (a different project may have
+  // different custom commands). Failures are non-fatal: the palette just falls
+  // back to whatever the session's system/init list provides.
+  useEffect(() => {
+    if (!cwd) return;
+    let cancelled = false;
+    chatListSlashCommands(cwd)
+      .then((commands) => {
+        if (!cancelled) setChatSlashCommandsBackend(commands);
+      })
+      .catch((err: unknown) => {
+        logToConsole("warn", "枚举 slash 命令失败", { cwd, error: String(err) }, "chat:page");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [cwd]);
 
   useEffect(() => {
     resetChatStore();
@@ -160,6 +193,27 @@ export function ChatPage() {
   // lifetime (M0): lock the cwd picker + selectors once a session exists or is
   // being created. Changing any of them means starting a new session.
   const sessionLocked = sessionId !== null || sessionPending;
+
+  // Slash-command palette: merge the backend list with the session's
+  // authoritative names, then filter by what the user has typed after `/`.
+  const mergedSlashCommands = useMemo(
+    () => mergeSlashCommands(slashCommandsBackend, slashCommandNames),
+    [slashCommandsBackend, slashCommandNames]
+  );
+  const slashQuery = slashQueryFromInput(input);
+  const slashItems = useMemo(
+    () => (slashQuery === null ? [] : filterSlashCommands(mergedSlashCommands, slashQuery)),
+    [slashQuery, mergedSlashCommands]
+  );
+  const slashOpen = slashQuery !== null && slashItems.length > 0;
+
+  // Keep the highlighted row in range as the filtered list shrinks/grows.
+  useEffect(() => {
+    setSlashActiveIndex((prev) => {
+      if (slashItems.length === 0) return 0;
+      return Math.min(prev, slashItems.length - 1);
+    });
+  }, [slashItems.length]);
 
   const ensureSession = useCallback(async (): Promise<string> => {
     if (activeSessionIdRef.current) return activeSessionIdRef.current;
@@ -216,6 +270,23 @@ export function ChatPage() {
     }
   }, [cwd, sessionLocked]);
 
+  // Insert the chosen command as `/name ` (trailing space so the user can type
+  // args). We deliberately do NOT auto-send — slash commands often take
+  // arguments. Refocus the textarea and reset the highlight.
+  const pickSlashCommand = useCallback((name: string) => {
+    setInput(`/${name} `);
+    setSlashActiveIndex(0);
+    // Defer focus until after the value update so the caret lands at the end.
+    requestAnimationFrame(() => {
+      const node = textareaRef.current;
+      if (node) {
+        node.focus();
+        const end = node.value.length;
+        node.setSelectionRange(end, end);
+      }
+    });
+  }, []);
+
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
     if (!trimmed || sending || sessionPending) return;
@@ -236,12 +307,42 @@ export function ChatPage() {
 
   const handleKeyDown = useCallback(
     (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+      // While the slash palette is open, hijack the navigation keys. IME
+      // composition is left untouched so candidate selection still works.
+      if (slashOpen && !event.nativeEvent.isComposing) {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          setSlashActiveIndex((prev) => (prev + 1) % slashItems.length);
+          return;
+        }
+        if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setSlashActiveIndex((prev) => (prev - 1 + slashItems.length) % slashItems.length);
+          return;
+        }
+        if (event.key === "Enter" || event.key === "Tab") {
+          const chosen = slashItems[slashActiveIndex];
+          if (chosen) {
+            event.preventDefault();
+            pickSlashCommand(chosen.name);
+            return;
+          }
+        }
+        if (event.key === "Escape") {
+          event.preventDefault();
+          // Close the palette without losing what was typed: append a space so
+          // `slashQueryFromInput` stops matching (input no longer a bare /name).
+          setInput((prev) => (slashQueryFromInput(prev) !== null ? `${prev} ` : prev));
+          return;
+        }
+      }
+
       if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
         event.preventDefault();
         handleSend();
       }
     },
-    [handleSend]
+    [handleSend, slashOpen, slashItems, slashActiveIndex, pickSlashCommand]
   );
 
   const sendDisabled = !input.trim() || sending || sessionPending || !cwd;
@@ -315,12 +416,23 @@ export function ChatPage() {
           </div>
         ) : null}
 
-        <div className="flex items-end gap-2 border-t border-line bg-surface-panel px-4 py-3">
+        <div className="relative flex items-end gap-2 border-t border-line bg-surface-panel px-4 py-3">
+          {slashOpen ? (
+            <div className="absolute bottom-full left-4 right-4 z-10 mb-1">
+              <ChatSlashCommandPalette
+                items={slashItems}
+                activeIndex={slashActiveIndex}
+                onHover={setSlashActiveIndex}
+                onPick={(command) => pickSlashCommand(command.name)}
+              />
+            </div>
+          ) : null}
           <Textarea
+            ref={textareaRef}
             value={input}
             onChange={(event) => setInput(event.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入消息，回车发送，Shift+回车换行"
+            placeholder="输入消息，回车发送，Shift+回车换行；输入 / 唤出命令"
             rows={2}
             className="min-h-[44px]"
             disabled={sessionPending}
