@@ -116,13 +116,13 @@ pub(crate) async fn create_session<R: tauri::Runtime>(
     let cwd = validate_cwd(&app, &cwd)?;
     let session_id = generate_uuid_v4();
 
-    let claude_path = resolve_claude_executable_path().ok_or_else(|| {
+    let claude_path = resolve_chat_launcher_path().ok_or_else(|| {
         // Distinct from the process-down codes claude_proc returns: this is a
-        // setup error (no `claude` on PATH), so the frontend can prompt the
+        // setup error (no launcher on PATH), so the frontend can prompt the
         // user to install/locate the CLI rather than retry the spawn.
         AppError::new(
             "CHAT_CLAUDE_NOT_FOUND",
-            "could not locate the `claude` executable on PATH".to_string(),
+            "could not locate `reclaude` or `claude` on PATH".to_string(),
         )
     })?;
 
@@ -181,26 +181,48 @@ pub(crate) fn default_cwd<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppRe
     Ok(home.to_string_lossy().into_owned())
 }
 
-/// Walk PATH for the `claude` binary so we can pass it to
-/// [`ClaudeProcConfig::claude_path`]. AIO's `cli_manager::claude_info_get`
-/// does richer probing (login-shell + extra home dirs), but it takes the
-/// non-generic `tauri::AppHandle` and runs blocking I/O — both inconvenient
-/// from this generic, async service. PATH-only scanning is enough for
-/// production users (claude is always added to PATH by its installer);
-/// returns `None` when not found so the caller can surface a clear error.
-fn resolve_claude_executable_path() -> Option<String> {
-    let names: &[&str] = if cfg!(windows) {
-        &["claude.cmd", "claude.exe", "claude.ps1", "claude"]
-    } else {
-        &["claude"]
-    };
+/// Resolve the launcher used to start a chat session's `claude` process.
+///
+/// Preference order:
+/// 1. `AIO_CHAT_CLAUDE_LAUNCHER` env var (absolute path) — explicit override
+///    for CI / non-standard installs.
+/// 2. `reclaude` on PATH — the user's normal launcher. It performs a config
+///    sync (auth / endpoint setup, printed as a `同步配置…` line on **stderr**,
+///    which `claude_proc` drains to the log rather than surfacing as an error)
+///    then delegates to `claude`, forwarding every argument verbatim. Spawning
+///    it makes chat use the exact launch path the user uses interactively, so
+///    authentication and config match — a bare `claude` skips that sync and can
+///    fail with 401.
+/// 3. `claude` on PATH — fallback when `reclaude` is not installed.
+///
+/// PATH-only scanning is enough for production users (these launchers add
+/// themselves to PATH); returns `None` when nothing is found so the caller can
+/// surface a clear setup error.
+fn resolve_chat_launcher_path() -> Option<String> {
+    if let Some(override_path) = std::env::var_os("AIO_CHAT_CLAUDE_LAUNCHER") {
+        let candidate = PathBuf::from(override_path);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().into_owned());
+        }
+    }
 
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
-        for name in names {
-            let candidate = dir.join(name);
-            if candidate.is_file() {
-                return Some(candidate.to_string_lossy().into_owned());
+    let exts: &[&str] = if cfg!(windows) {
+        &[".cmd", ".exe", ".ps1", ""]
+    } else {
+        &[""]
+    };
+    let dirs: Vec<PathBuf> = std::env::var_os("PATH")
+        .map(|p| std::env::split_paths(&p).collect())
+        .unwrap_or_default();
+
+    // `reclaude` is preferred over `claude` across all PATH directories.
+    for base in ["reclaude", "claude"] {
+        for dir in &dirs {
+            for ext in exts {
+                let candidate = dir.join(format!("{base}{ext}"));
+                if candidate.is_file() {
+                    return Some(candidate.to_string_lossy().into_owned());
+                }
             }
         }
     }
