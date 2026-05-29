@@ -1,8 +1,8 @@
 //! Usage: Thin IPC wrappers for M0 chat session commands.
 //!
 //! These mirror the service entry points in [`crate::app::chat_service`]
-//! one-for-one — the heavy lifting (sidecar lifecycle, validation,
-//! event emission) lives there.
+//! one-for-one — the heavy lifting (per-session `claude` process lifecycle,
+//! validation, event emission) lives there.
 //!
 //! Convention: every input is wrapped in a `*Input` struct with
 //! `#[serde(rename_all = "camelCase")]` to match the rest of the codebase
@@ -16,6 +16,15 @@ use crate::app::chat_service::{self, ChatState};
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ChatCreateSessionInput {
     pub cwd: String,
+    /// `claude` permission mode (e.g. `default`, `acceptEdits`, `plan`,
+    /// `bypassPermissions`). `None` lets `claude` use its own default.
+    pub permission_mode: Option<String>,
+    /// Tools to pre-allow for this session (`--allowedTools`). The coarse
+    /// allow/ask/deny rules still live in `settings.json` and are managed by
+    /// the CLI manager page; this is the per-session overlay only.
+    pub allowed_tools: Option<Vec<String>>,
+    /// Tools to deny for this session (`--disallowedTools`).
+    pub disallowed_tools: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, specta::Type)]
@@ -43,8 +52,9 @@ pub(crate) async fn chat_default_cwd(app: tauri::AppHandle) -> Result<String, St
 
 /// Create a new chat session bound to an absolute, existing `cwd`.
 ///
-/// Returns the freshly generated session id (UUID v4) once the sidecar
-/// acknowledges the session.
+/// Spawns a dedicated `claude` process for the session and returns its
+/// freshly generated session id (UUID v4). Per-session permission knobs are
+/// passed straight through; absent tool lists default to empty.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn chat_create_session(
@@ -52,15 +62,22 @@ pub(crate) async fn chat_create_session(
     chat_state: tauri::State<'_, ChatState>,
     input: ChatCreateSessionInput,
 ) -> Result<String, String> {
-    chat_service::create_session(chat_state.service(), app, input.cwd)
-        .await
-        .map_err(Into::into)
+    chat_service::create_session(
+        chat_state.service(),
+        app,
+        input.cwd,
+        input.permission_mode,
+        input.allowed_tools.unwrap_or_default(),
+        input.disallowed_tools.unwrap_or_default(),
+    )
+    .await
+    .map_err(Into::into)
 }
 
 /// Forward a user message to an existing chat session.
 ///
-/// Streaming SDK output is delivered out-of-band as `chat-event-{session_id}`
-/// Tauri events.
+/// The `claude` process's streaming stream-json output is delivered
+/// out-of-band as `chat-event-{session_id}` Tauri events.
 #[tauri::command]
 #[specta::specta]
 pub(crate) async fn chat_send_message(

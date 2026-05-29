@@ -5,9 +5,15 @@
 
 import { useSyncExternalStore } from "react";
 import { emitListenerSnapshot } from "../utils/listeners";
-import type { ChatSdkContentBlock, ChatSdkEvent } from "../services/chat/chat";
+import type { ChatPermissionMode, ChatSdkContentBlock, ChatSdkEvent } from "../services/chat/chat";
 
 export type ChatRole = "user" | "assistant";
+
+/**
+ * Default permission mode for a fresh chat. `default` honours the user's
+ * settings.json allow/ask/deny rules — the safest baseline.
+ */
+export const DEFAULT_CHAT_PERMISSION_MODE: ChatPermissionMode = "default";
 
 export type ChatMessage = {
   /** Local monotonically increasing id; not the SDK message id. */
@@ -30,6 +36,12 @@ export type ChatStoreSnapshot = {
   sending: boolean;
   /** Last user-visible error (sticky until cleared / next send). */
   error: string | null;
+  /**
+   * Claude-native permission mode chosen for this chat. Editable only until
+   * the session is created; afterwards the selector is locked (M0 fixes the
+   * mode for the session lifetime).
+   */
+  permissionMode: ChatPermissionMode;
 };
 
 type Listener = () => void;
@@ -42,6 +54,7 @@ const INITIAL_STATE: ChatStoreState = {
   sessionPending: false,
   sending: false,
   error: null,
+  permissionMode: DEFAULT_CHAT_PERMISSION_MODE,
 };
 
 let state: ChatStoreState = INITIAL_STATE;
@@ -96,6 +109,16 @@ export function setChatSessionId(sessionId: string | null) {
 
 export function setChatError(error: string | null) {
   setState({ ...state, error, sending: false });
+}
+
+/**
+ * Update the permission mode for the (not-yet-created) session. Callers
+ * should gate this on `sessionId === null`; the store does not enforce it
+ * so tests can drive it freely.
+ */
+export function setChatPermissionMode(mode: ChatPermissionMode) {
+  if (state.permissionMode === mode) return;
+  setState({ ...state, permissionMode: mode });
 }
 
 /**

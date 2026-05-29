@@ -36,6 +36,37 @@ export type ChatErrorPayload = {
   error: string;
 };
 
+/**
+ * Claude-native permission modes, forwarded verbatim to the `claude`
+ * subprocess (`--permission-mode <mode>`). Values match the Claude Agent
+ * SDK `PermissionMode` union exactly — do NOT translate to snake_case:
+ *   - `plan`             — Claude plans first; no tool execution until approved.
+ *   - `acceptEdits`      — auto-accepts file edits.
+ *   - `default`          — honours settings.json allow/ask/deny rules.
+ *   - `auto`             — the model decides whether to prompt.
+ *   - `dontAsk`          — allowed tools run, everything else is denied (no prompt).
+ *   - `bypassPermissions` — auto-approves every tool use (dangerous).
+ */
+export type ChatPermissionMode =
+  | "plan"
+  | "acceptEdits"
+  | "default"
+  | "auto"
+  | "dontAsk"
+  | "bypassPermissions";
+
+/**
+ * Options for `chat_create_session`. The permission mode (and optional
+ * tool allow/deny lists) are fixed for the lifetime of the session in M0;
+ * changing mode mid-session is a later milestone.
+ */
+export type ChatCreateSessionOptions = {
+  cwd: string;
+  permissionMode?: ChatPermissionMode;
+  allowedTools?: string[];
+  disallowedTools?: string[];
+};
+
 export function chatEventName(sessionId: string): string {
   return `chat-event-${sessionId}`;
 }
@@ -58,8 +89,15 @@ export async function chatDefaultCwd(): Promise<string> {
   return invoke<string>("chat_default_cwd");
 }
 
-export async function chatCreateSession(cwd: string): Promise<string> {
-  return invoke<string>("chat_create_session", { input: { cwd } });
+export async function chatCreateSession(opts: ChatCreateSessionOptions): Promise<string> {
+  const { cwd, permissionMode, allowedTools, disallowedTools } = opts;
+  // Only forward optional keys when set, so the backend sees a clean input
+  // (and so a `default`-equivalent omission stays absent rather than null).
+  const input: Record<string, unknown> = { cwd };
+  if (permissionMode) input.permissionMode = permissionMode;
+  if (allowedTools && allowedTools.length > 0) input.allowedTools = allowedTools;
+  if (disallowedTools && disallowedTools.length > 0) input.disallowedTools = disallowedTools;
+  return invoke<string>("chat_create_session", { input });
 }
 
 export async function chatSendMessage(sessionId: string, content: string): Promise<void> {

@@ -3,6 +3,7 @@
 pub(crate) mod app_paths;
 pub(crate) mod base_url_probe;
 pub(crate) mod claude_hooks;
+pub(crate) mod claude_proc;
 pub(crate) mod claude_settings;
 pub(crate) mod cli_manager;
 pub(crate) mod cli_proxy;
@@ -23,6 +24,5 @@ pub(crate) mod provider_circuit_breakers;
 pub(crate) mod request_attempt_logs;
 pub(crate) mod request_logs;
 pub(crate) mod settings;
-pub(crate) mod sidecar;
 #[cfg_attr(not(windows), allow(dead_code, unused_imports))]
 pub(crate) mod wsl;

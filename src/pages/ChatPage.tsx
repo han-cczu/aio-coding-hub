@@ -17,11 +17,13 @@ import {
   appendUserMessage,
   resetChatStore,
   setChatError,
+  setChatPermissionMode,
   setChatSessionId,
   setChatSessionPending,
   useChatStore,
   type ChatMessage,
 } from "../stores/chatStore";
+import { ChatPermissionModeSelector } from "../components/chat/ChatPermissionModeSelector";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
 import { PageHeader } from "../ui/PageHeader";
@@ -73,7 +75,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 }
 
 export function ChatPage() {
-  const { sessionId, messages, sessionPending, sending, error } = useChatStore();
+  const { sessionId, messages, sessionPending, sending, error, permissionMode } = useChatStore();
   const [input, setInput] = useState("");
   // Track the latest sessionId via a ref so the unmount cleanup picks up
   // sessions created mid-lifetime without re-running on every change.
@@ -140,7 +142,7 @@ export function ChatPage() {
     }
     setChatSessionPending(true);
     try {
-      const newSessionId = await chatCreateSession(cwd);
+      const newSessionId = await chatCreateSession({ cwd, permissionMode });
       setChatSessionId(newSessionId);
       activeSessionIdRef.current = newSessionId;
       return newSessionId;
@@ -150,7 +152,7 @@ export function ChatPage() {
       setChatError(message);
       throw error;
     }
-  }, [cwd]);
+  }, [cwd, permissionMode]);
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
@@ -192,6 +194,14 @@ export function ChatPage() {
   return (
     <div className="flex h-full flex-col gap-4 overflow-hidden">
       <PageHeader title="Chat" subtitle={`cwd: ${cwd ?? "解析中…"} · ${statusLabel}`} />
+
+      <ChatPermissionModeSelector
+        value={permissionMode}
+        onChange={setChatPermissionMode}
+        // Mode is fixed once the session is created (M0). Lock the selector
+        // as soon as a session exists or is being created.
+        disabled={sessionId !== null || sessionPending}
+      />
 
       <Card padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div

@@ -114,6 +114,26 @@ describe("stores/chatStore", () => {
     expect(result.current.messages[1].text).toBe("partial");
   });
 
+  it("defaults the permission mode and updates it via setChatPermissionMode", async () => {
+    const { useChatStore, setChatPermissionMode, resetChatStore, DEFAULT_CHAT_PERMISSION_MODE } =
+      await importFreshChatStore();
+    resetChatStore();
+
+    const { result } = renderHook(() => useChatStore());
+    expect(result.current.permissionMode).toBe(DEFAULT_CHAT_PERMISSION_MODE);
+    expect(result.current.permissionMode).toBe("default");
+
+    act(() => {
+      setChatPermissionMode("plan");
+    });
+    expect(result.current.permissionMode).toBe("plan");
+
+    act(() => {
+      setChatPermissionMode("bypassPermissions");
+    });
+    expect(result.current.permissionMode).toBe("bypassPermissions");
+  });
+
   it("setChatSessionId clears the pending flag", async () => {
     const { useChatStore, setChatSessionPending, setChatSessionId, resetChatStore } =
       await importFreshChatStore();

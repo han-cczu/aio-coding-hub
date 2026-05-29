@@ -1,46 +1,36 @@
-//! Usage: M0 chat service — owns the Node sidecar handle and chat session state.
+//! Usage: M0 chat service — owns one `claude` child process per session and
+//! bridges its stream-json output to per-session Tauri events.
 //!
-//! Responsibilities:
-//! - Lazily spawn the sidecar on first `create_session`; reuse it afterwards.
-//! - Track in-memory session state keyed by UUID; M0 keeps everything in
+//! Path B model (one session == one `claude` process):
+//! - `create_session` spawns a dedicated [`ClaudeProc`] running the local
+//!   `claude` CLI in `--input-format stream-json` mode; the process stays
+//!   resident to handle multi-turn input.
+//! - Sessions are tracked in-memory keyed by UUID; M0 keeps everything in
 //!   RAM (no DB), wiped on app exit.
-//! - Translate sidecar stdout into Tauri events targeted per session.
-//! - Validate session cwd (absolute + existing + not the AIO data dir).
+//! - Each process's callbacks are wired to `chat-event-{id}` /
+//!   `chat-error-{id}` / `chat-exit-{id}` Tauri events.
+//! - Validates session cwd (absolute + existing + not the AIO data dir).
+//! - Per-session permission knobs (`permission_mode` / `allowed_tools` /
+//!   `disallowed_tools`) flow through into [`ClaudeProcConfig`]. The
+//!   coarse-grained allow/ask/deny rules stay in `claude_settings.rs` and the
+//!   CLI manager page — `claude` reads those from `settings.json` itself, so
+//!   chat does not duplicate that editor.
 //!
 //! Out of scope (later milestones):
-//! - DB persistence and migration v33 (M2).
-//! - Sidecar auto-restart and health checks (M3).
-//! - Production-mode bundled sidecar path resolution (M4).
+//! - DB persistence and migration (M2).
+//! - Process auto-restart and health checks (M3).
+//! - Production-mode bundled CLI path resolution (M4).
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 
 use rand::RngCore;
 use serde::Serialize;
 use tauri::Emitter;
-use tokio::sync::{oneshot, Mutex as TokioMutex};
 
-use crate::infra::sidecar::{Sidecar, SidecarCallbacks, SidecarRequest, SidecarResponse};
+use crate::infra::claude_proc::{ClaudeProc, ClaudeProcCallbacks, ClaudeProcConfig};
 use crate::shared::error::{AppError, AppResult};
-
-/// Default Node executable name when the host PATH already resolves it.
-const DEFAULT_NODE_EXECUTABLE: &str = "node";
-
-/// Override env var: absolute path to a `node` binary. Useful in CI and
-/// for devs whose PATH does not include Node.
-const NODE_OVERRIDE_ENV: &str = "AIO_CHAT_NODE_PATH";
-
-/// In-memory record of a live session.
-///
-/// M0 keeps only the minimum needed to honour follow-up commands; the
-/// `pending_ready` channel lets `create_session` wait for the sidecar's
-/// `session_ready` acknowledgement before returning to the frontend.
-struct SessionState {
-    #[allow(dead_code)] // surfaced through diagnostics in later milestones.
-    cwd: PathBuf,
-    pending_ready: Option<oneshot::Sender<Result<(), String>>>,
-}
 
 /// Tauri-managed state holding the chat service. Cloning is cheap.
 #[derive(Default, Clone)]
@@ -55,56 +45,43 @@ impl ChatState {
 }
 
 /// Core chat service. Lives behind an `Arc` inside `ChatState`.
+///
+/// Holds one resident `claude` process per live session. The map is the
+/// sole owner of each [`ClaudeProc`]; removing an entry drops the handle,
+/// and (because the process is spawned with `kill_on_drop`) tears the child
+/// down. Callbacks only ever hold a [`Weak`] back-reference, so a process
+/// cannot keep the service — or itself — alive.
 #[derive(Default)]
 pub(crate) struct ChatService {
-    sidecar: TokioMutex<Option<Arc<Sidecar>>>,
-    sessions: Mutex<HashMap<String, SessionState>>,
+    sessions: Mutex<HashMap<String, Arc<ClaudeProc>>>,
 }
 
 impl ChatService {
-    fn has_session(&self, session_id: &str) -> bool {
-        match lock_sessions(&self.sessions) {
-            Ok(sessions) => sessions.contains_key(session_id),
-            Err(_) => false,
-        }
+    /// Clone out the process handle for `session_id`, but only while it is
+    /// still alive. A process that has exited (but whose `on_exit` cleanup
+    /// has not yet removed the entry) is treated as gone, so callers see
+    /// `CHAT_SESSION_NOT_FOUND` rather than dialing a dead pipe.
+    fn proc(&self, session_id: &str) -> Option<Arc<ClaudeProc>> {
+        let sessions = lock_sessions(&self.sessions).ok()?;
+        sessions
+            .get(session_id)
+            .filter(|proc| proc.is_alive())
+            .cloned()
     }
 
-    fn remove_session(&self, session_id: &str) {
-        if let Ok(mut sessions) = lock_sessions(&self.sessions) {
-            sessions.remove(session_id);
-        }
+    fn insert_session(&self, session_id: String, proc: Arc<ClaudeProc>) -> AppResult<()> {
+        let mut sessions = lock_sessions(&self.sessions)?;
+        sessions.insert(session_id, proc);
+        Ok(())
     }
 
-    /// Settle the `session_ready` waiter, if one is registered.
-    fn settle_pending_ready(&self, session_id: &str, outcome: Result<(), String>) {
-        let waiter = {
-            let Ok(mut sessions) = lock_sessions(&self.sessions) else {
-                return;
-            };
-            sessions
-                .get_mut(session_id)
-                .and_then(|session| session.pending_ready.take())
-        };
-        if let Some(waiter) = waiter {
-            let _ = waiter.send(outcome);
-        }
-    }
-
-    /// Wake every pending waiter with a sidecar-down error.
-    fn mark_all_sidecar_down(&self) {
-        if let Ok(mut sessions) = lock_sessions(&self.sessions) {
-            for (id, session) in sessions.iter_mut() {
-                if let Some(waiter) = session.pending_ready.take() {
-                    let _ = waiter.send(Err(format!("sidecar exited before {id} was ready")));
-                }
-            }
-        }
-    }
-
-    /// Look up the cached sidecar handle (without spawning).
-    async fn current_sidecar(&self) -> Option<Arc<Sidecar>> {
-        let guard = self.sidecar.lock().await;
-        guard.as_ref().filter(|s| s.is_alive()).cloned()
+    /// Drop the process handle for `session_id` and return it (if present)
+    /// so the caller can `close()` it outside the lock. A poisoned lock is
+    /// treated as "nothing to remove" rather than surfacing an error — the
+    /// caller's contract (idempotent close) does not benefit from failing.
+    fn take_session(&self, session_id: &str) -> Option<Arc<ClaudeProc>> {
+        let mut sessions = lock_sessions(&self.sessions).ok()?;
+        sessions.remove(session_id)
     }
 }
 
@@ -113,115 +90,83 @@ struct ChatErrorPayload {
     error: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+struct ChatExitPayload {
+    code: Option<i32>,
+}
+
 /// Create a chat session bound to `cwd`.
 ///
 /// 1. Canonicalises `cwd` and rejects anything that is not an existing
 ///    directory or that lives inside the AIO data dir.
-/// 2. Lazily spawns the sidecar (subsequent calls reuse the handle).
-/// 3. Sends `create_session` and awaits the matching `session_ready`
-///    response before returning the new session id.
+/// 2. Resolves the local `claude` executable and spawns a dedicated
+///    process for the session, wiring its callbacks to per-session events.
+/// 3. Stores the handle and returns the freshly generated session id.
+///
+/// On spawn failure the session is not registered, so the frontend can
+/// retry without leaking a half-open entry.
 pub(crate) async fn create_session<R: tauri::Runtime>(
     service: Arc<ChatService>,
     app: tauri::AppHandle<R>,
     cwd: String,
+    permission_mode: Option<String>,
+    allowed_tools: Vec<String>,
+    disallowed_tools: Vec<String>,
 ) -> AppResult<String> {
     let cwd = validate_cwd(&app, &cwd)?;
     let session_id = generate_uuid_v4();
-    let (ready_tx, ready_rx) = oneshot::channel();
 
-    {
-        let mut sessions = lock_sessions(&service.sessions)?;
-        sessions.insert(
-            session_id.clone(),
-            SessionState {
-                cwd: cwd.clone(),
-                pending_ready: Some(ready_tx),
-            },
-        );
-    }
+    let claude_path = resolve_claude_executable_path().ok_or_else(|| {
+        // Distinct from the process-down codes claude_proc returns: this is a
+        // setup error (no `claude` on PATH), so the frontend can prompt the
+        // user to install/locate the CLI rather than retry the spawn.
+        AppError::new(
+            "CHAT_CLAUDE_NOT_FOUND",
+            "could not locate the `claude` executable on PATH".to_string(),
+        )
+    })?;
 
-    let sidecar = match ensure_sidecar(&service, &app).await {
-        Ok(sidecar) => sidecar,
-        Err(err) => {
-            service.remove_session(&session_id);
-            return Err(err);
-        }
-    };
-
-    let request = SidecarRequest::CreateSession {
-        session_id: session_id.clone(),
+    let config = ClaudeProcConfig {
+        claude_path,
         cwd: cwd.to_string_lossy().into_owned(),
+        session_id: session_id.clone(),
+        permission_mode: normalize_permission_mode(permission_mode),
+        allowed_tools: sanitize_tools(allowed_tools),
+        disallowed_tools: sanitize_tools(disallowed_tools),
+        // M0 grants no extra read roots beyond `cwd`; M1 will surface a picker.
+        add_dirs: Vec::new(),
     };
-    if let Err(err) = sidecar.send(&request).await {
-        service.remove_session(&session_id);
-        return Err(err);
-    }
 
-    match ready_rx.await {
-        Ok(Ok(())) => Ok(session_id),
-        Ok(Err(reason)) => {
-            service.remove_session(&session_id);
-            Err(AppError::new(
-                "CHAT_SESSION_NOT_FOUND",
-                format!("sidecar refused session: {reason}"),
-            ))
-        }
-        Err(_) => {
-            service.remove_session(&session_id);
-            Err(AppError::new(
-                "CHAT_SIDECAR_DOWN",
-                "sidecar dropped before session_ready".to_string(),
-            ))
-        }
-    }
+    let callbacks = build_callbacks(Arc::downgrade(&service), &app, session_id.clone());
+    let proc = ClaudeProc::spawn(config, callbacks).await?;
+
+    service.insert_session(session_id.clone(), Arc::new(proc))?;
+    Ok(session_id)
 }
 
+/// Forward a user message to the session's resident `claude` process.
 pub(crate) async fn send_message(
     service: Arc<ChatService>,
     session_id: String,
     content: String,
 ) -> AppResult<()> {
-    if !service.has_session(&session_id) {
-        return Err(AppError::new(
+    let proc = service.proc(&session_id).ok_or_else(|| {
+        AppError::new(
             "CHAT_SESSION_NOT_FOUND",
             format!("session {session_id} not found"),
-        ));
-    }
-
-    let sidecar = service.current_sidecar().await.ok_or_else(|| {
-        AppError::new(
-            "CHAT_SIDECAR_DOWN",
-            "sidecar has not been started".to_string(),
         )
     })?;
-    sidecar
-        .send(&SidecarRequest::SendMessage {
-            session_id,
-            content,
-        })
-        .await
+    proc.send_user_message(content).await
 }
 
+/// Tear down a session's process. Idempotent: an unknown session id (or one
+/// whose process already exited) returns `Ok(())` so the frontend can retry
+/// after a crash or reload.
 pub(crate) async fn close_session(service: Arc<ChatService>, session_id: String) -> AppResult<()> {
-    if !service.has_session(&session_id) {
-        // Closing an already-closed session is a no-op — the frontend may
-        // retry after a crash or reload. Return Ok so it does not raise.
+    let Some(proc) = service.take_session(&session_id) else {
         return Ok(());
-    }
-
-    let sidecar = service.current_sidecar().await;
-    let send_result = if let Some(sidecar) = sidecar {
-        sidecar
-            .send(&SidecarRequest::CloseSession {
-                session_id: session_id.clone(),
-            })
-            .await
-    } else {
-        Ok(())
     };
-
-    service.remove_session(&session_id);
-    send_result
+    proc.close().await
 }
 
 /// Resolve a sensible default cwd for a new chat session.
@@ -232,47 +177,17 @@ pub(crate) async fn close_session(service: Arc<ChatService>, session_id: String)
 /// (see `capabilities/main-core.json`), so all path resolution happens
 /// in Rust. M1 will replace this with a per-session cwd picker.
 pub(crate) fn default_cwd<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppResult<String> {
-    let home = crate::app_paths::home_dir(app)?;
+    let home = crate::infra::app_paths::home_dir(app)?;
     Ok(home.to_string_lossy().into_owned())
 }
 
-async fn ensure_sidecar<R: tauri::Runtime>(
-    service: &Arc<ChatService>,
-    app: &tauri::AppHandle<R>,
-) -> AppResult<Arc<Sidecar>> {
-    let mut guard = service.sidecar.lock().await;
-    if let Some(existing) = guard.as_ref() {
-        if existing.is_alive() {
-            return Ok(existing.clone());
-        }
-        // Previous instance died — drop it before re-spawning.
-        *guard = None;
-    }
-
-    let script_path = sidecar_script_path()?;
-    let node_executable = resolve_node_executable();
-    let claude_code_path = resolve_claude_executable_path();
-    let callbacks = build_callbacks(service.clone(), app);
-    let sidecar =
-        Arc::new(Sidecar::spawn(&node_executable, script_path, callbacks, claude_code_path).await?);
-    *guard = Some(sidecar.clone());
-    Ok(sidecar)
-}
-
-/// Walk PATH for the `claude` binary so we can pass it to the SDK as
-/// `pathToClaudeCodeExecutable` (Option B in the chat M0 design). The SDK
-/// normally ships a platform-specific optional dep providing this binary,
-/// but pnpm/Windows installs sometimes skip optional deps (the `win32-x64`
-/// package fails to install), so the env-var override below is the most
-/// reliable way to keep chat working with the `claude` CLI the user already
-/// has installed.
-///
-/// Note: AIO's `cli_manager::claude_info_get` does richer probing
-/// (login-shell + extra home dirs), but it takes the non-generic
-/// `tauri::AppHandle` and runs blocking I/O — both inconvenient from this
-/// generic, async service. PATH-only scanning is enough for production
-/// users (claude is always added to PATH by its installer); returns `None`
-/// when not found so we fall back to the SDK default.
+/// Walk PATH for the `claude` binary so we can pass it to
+/// [`ClaudeProcConfig::claude_path`]. AIO's `cli_manager::claude_info_get`
+/// does richer probing (login-shell + extra home dirs), but it takes the
+/// non-generic `tauri::AppHandle` and runs blocking I/O — both inconvenient
+/// from this generic, async service. PATH-only scanning is enough for
+/// production users (claude is always added to PATH by its installer);
+/// returns `None` when not found so the caller can surface a clear error.
 fn resolve_claude_executable_path() -> Option<String> {
     let names: &[&str] = if cfg!(windows) {
         &["claude.cmd", "claude.exe", "claude.ps1", "claude"]
@@ -292,111 +207,91 @@ fn resolve_claude_executable_path() -> Option<String> {
     None
 }
 
+/// Trim a `permission_mode` string and treat blank/empty as "unset" so the
+/// process module can simply omit the `--permission-mode` flag.
+fn normalize_permission_mode(mode: Option<String>) -> Option<String> {
+    mode.map(|m| m.trim().to_string()).filter(|m| !m.is_empty())
+}
+
+/// Drop blank tool names that would otherwise become empty `--allowedTools`
+/// / `--disallowedTools` entries.
+fn sanitize_tools(tools: Vec<String>) -> Vec<String> {
+    tools
+        .into_iter()
+        .map(|t| t.trim().to_string())
+        .filter(|t| !t.is_empty())
+        .collect()
+}
+
+/// Build the callback set for a single session, forwarding the process's
+/// stream-json output to per-session Tauri events.
+///
+/// Callbacks hold a [`Weak`] back-reference to the service so they never
+/// keep it (or, transitively, the process) alive. `on_exit` removes the
+/// session from the map — after which `send_message` reports
+/// `CHAT_SESSION_NOT_FOUND` and `close_session` is a no-op — and emits a
+/// `chat-exit-{id}` event so the frontend learns the session ended.
 fn build_callbacks<R: tauri::Runtime>(
-    service: Arc<ChatService>,
+    service: Weak<ChatService>,
     app: &tauri::AppHandle<R>,
-) -> SidecarCallbacks {
-    let app_for_response = app.clone();
+    session_id: String,
+) -> ClaudeProcCallbacks {
+    let app_for_event = app.clone();
+    let event_name = format!("chat-event-{session_id}");
+    let on_event = move |event: serde_json::Value| {
+        if let Err(err) = app_for_event.emit(&event_name, event) {
+            tracing::warn!(
+                event = %event_name,
+                error = %err,
+                "failed to emit chat event",
+            );
+        }
+    };
+
+    let app_for_error = app.clone();
+    let error_event = format!("chat-error-{session_id}");
+    let on_error = move |error: String| {
+        let payload = ChatErrorPayload { error };
+        if let Err(err) = app_for_error.emit(&error_event, payload) {
+            tracing::warn!(
+                event = %error_event,
+                error = %err,
+                "failed to emit chat error",
+            );
+        }
+    };
+
     let app_for_exit = app.clone();
-    let service_weak = Arc::downgrade(&service);
-
-    let response_service = service_weak.clone();
-    let on_response = move |response: SidecarResponse| {
-        let Some(service) = response_service.upgrade() else {
-            return;
-        };
-        match response {
-            SidecarResponse::Ready {
-                sidecar_version,
-                sdk_version,
-            } => {
-                tracing::info!(
-                    sidecar_version = %sidecar_version,
-                    sdk_version = %sdk_version,
-                    "chat sidecar ready",
-                );
-            }
-            SidecarResponse::Pong => {}
-            SidecarResponse::SessionReady { session_id } => {
-                service.settle_pending_ready(&session_id, Ok(()));
-            }
-            SidecarResponse::Event {
-                session_id,
-                sdk_event,
-            } => {
-                let event_name = format!("chat-event-{session_id}");
-                if let Err(err) = app_for_response.emit(&event_name, sdk_event) {
-                    tracing::warn!(
-                        event = %event_name,
-                        error = %err,
-                        "failed to emit chat event",
-                    );
-                }
-            }
-            SidecarResponse::SessionError { session_id, error } => {
-                // If create_session is still waiting, surface the error there;
-                // otherwise also emit a chat-error-* event so the frontend can
-                // surface it on the running session.
-                service.settle_pending_ready(&session_id, Err(error.clone()));
-                let event_name = format!("chat-error-{session_id}");
-                let payload = ChatErrorPayload { error };
-                if let Err(err) = app_for_response.emit(&event_name, payload) {
-                    tracing::warn!(
-                        event = %event_name,
-                        error = %err,
-                        "failed to emit chat error",
-                    );
-                }
-            }
+    let exit_event = format!("chat-exit-{session_id}");
+    let exit_session_id = session_id;
+    let on_exit = move |code: Option<i32>| {
+        if let Some(service) = service.upgrade() {
+            // Idempotent: a session closed explicitly is already gone here.
+            let _ = service.take_session(&exit_session_id);
+        }
+        let payload = ChatExitPayload { code };
+        if let Err(err) = app_for_exit.emit(&exit_event, payload) {
+            tracing::warn!(
+                event = %exit_event,
+                error = %err,
+                "failed to emit chat exit",
+            );
         }
     };
 
-    let on_exit = move || {
-        if let Some(service) = service_weak.upgrade() {
-            service.mark_all_sidecar_down();
-        }
-        if let Err(err) = app_for_exit.emit("chat-sidecar-exited", ()) {
-            tracing::debug!(error = %err, "failed to emit chat-sidecar-exited");
-        }
-    };
-
-    SidecarCallbacks {
-        on_response: Box::new(on_response),
+    ClaudeProcCallbacks {
+        on_event: Box::new(on_event),
+        on_error: Box::new(on_error),
         on_exit: Box::new(on_exit),
     }
 }
 
 fn lock_sessions(
-    sessions: &Mutex<HashMap<String, SessionState>>,
-) -> AppResult<std::sync::MutexGuard<'_, HashMap<String, SessionState>>> {
+    sessions: &Mutex<HashMap<String, Arc<ClaudeProc>>>,
+) -> AppResult<std::sync::MutexGuard<'_, HashMap<String, Arc<ClaudeProc>>>> {
     sessions
         .lock()
         .map_err(|_| AppError::new("INTERNAL_ERROR", "chat session map poisoned".to_string()))
-}
-
-fn resolve_node_executable() -> String {
-    std::env::var(NODE_OVERRIDE_ENV)
-        .ok()
-        .map(|v| v.trim().to_string())
-        .filter(|v| !v.is_empty())
-        .unwrap_or_else(|| DEFAULT_NODE_EXECUTABLE.to_string())
-}
-
-fn sidecar_script_path() -> AppResult<PathBuf> {
-    // Dev mode resolution: <repo>/src-tauri/sidecar/chat-bridge/dist/chat-bridge.js.
-    // `CARGO_MANIFEST_DIR` resolves to `<repo>/src-tauri` for this crate.
-    let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").map_err(|_| {
-        AppError::new(
-            "CHAT_SIDECAR_DOWN",
-            "CARGO_MANIFEST_DIR is unset; cannot locate sidecar".to_string(),
-        )
-    })?;
-    let path = PathBuf::from(manifest_dir)
-        .join("sidecar")
-        .join("chat-bridge")
-        .join("dist")
-        .join("chat-bridge.js");
-    Ok(path)
 }
 
 fn validate_cwd<R: tauri::Runtime>(app: &tauri::AppHandle<R>, raw: &str) -> AppResult<PathBuf> {
@@ -478,7 +373,6 @@ fn generate_uuid_v4() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::env;
 
     #[test]
     fn generate_uuid_v4_produces_correct_format() {
@@ -513,6 +407,31 @@ mod tests {
     }
 
     #[test]
+    fn normalize_permission_mode_treats_blank_as_unset() {
+        assert_eq!(normalize_permission_mode(None), None);
+        assert_eq!(normalize_permission_mode(Some(String::new())), None);
+        assert_eq!(normalize_permission_mode(Some("   ".to_string())), None);
+        assert_eq!(
+            normalize_permission_mode(Some("  acceptEdits  ".to_string())),
+            Some("acceptEdits".to_string())
+        );
+    }
+
+    #[test]
+    fn sanitize_tools_drops_blank_entries_and_trims() {
+        let input = vec![
+            "  Read ".to_string(),
+            String::new(),
+            "Bash".to_string(),
+            "   ".to_string(),
+        ];
+        assert_eq!(
+            sanitize_tools(input),
+            vec!["Read".to_string(), "Bash".to_string()]
+        );
+    }
+
+    #[test]
     fn path_is_inside_detects_descendants() {
         let parent = Path::new("/foo/bar");
         assert!(path_is_inside(Path::new("/foo/bar"), parent));
@@ -526,39 +445,6 @@ mod tests {
         assert!(!path_is_inside(Path::new("/foo/baz"), parent));
         assert!(!path_is_inside(Path::new("/foo"), parent));
         assert!(!path_is_inside(Path::new("/other"), parent));
-    }
-
-    #[test]
-    fn sidecar_script_path_uses_manifest_dir() {
-        // CARGO_MANIFEST_DIR is always set during `cargo test`, so this
-        // really just verifies the suffix is what we expect.
-        let path = sidecar_script_path().expect("manifest dir is set during tests");
-        let suffix = Path::new("sidecar")
-            .join("chat-bridge")
-            .join("dist")
-            .join("chat-bridge.js");
-        assert!(
-            path.ends_with(&suffix),
-            "expected path to end with {suffix:?}, got {path:?}",
-        );
-    }
-
-    #[test]
-    fn resolve_node_executable_honours_env_override() {
-        let key = NODE_OVERRIDE_ENV;
-        let previous = env::var(key).ok();
-        env::set_var(key, "/custom/node");
-        assert_eq!(resolve_node_executable(), "/custom/node");
-
-        env::set_var(key, "  ");
-        assert_eq!(resolve_node_executable(), DEFAULT_NODE_EXECUTABLE);
-
-        env::remove_var(key);
-        assert_eq!(resolve_node_executable(), DEFAULT_NODE_EXECUTABLE);
-
-        if let Some(value) = previous {
-            env::set_var(key, value);
-        }
     }
 
     #[test]
