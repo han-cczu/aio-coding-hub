@@ -29,6 +29,10 @@ pub(crate) struct ChatCreateSessionInput {
     /// `None` (or any other value) means auto — prefer `reclaude`, fall back
     /// to `claude` (honouring the `AIO_CHAT_CLAUDE_LAUNCHER` override).
     pub launcher: Option<String>,
+    /// Model alias or id for `--model` (e.g. `claude-sonnet-4-6`, `opus`).
+    /// Blank/`None` lets `claude` pick its default; the value is validated
+    /// upstream by `claude`, not here.
+    pub model: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, specta::Type)]
@@ -74,6 +78,7 @@ pub(crate) async fn chat_create_session(
         input.allowed_tools.unwrap_or_default(),
         input.disallowed_tools.unwrap_or_default(),
         input.launcher,
+        input.model,
     )
     .await
     .map_err(Into::into)

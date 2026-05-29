@@ -93,7 +93,7 @@ export type ChatPermissionMode =
 export type ChatLauncher = "reclaude" | "claude";
 
 /**
- * Options for `chat_create_session`. The permission mode, launcher, and
+ * Options for `chat_create_session`. The permission mode, launcher, model, and
  * optional tool allow/deny lists are fixed for the lifetime of the session in
  * M0; changing them mid-session is a later milestone.
  */
@@ -101,6 +101,12 @@ export type ChatCreateSessionOptions = {
   cwd: string;
   permissionMode?: ChatPermissionMode;
   launcher?: ChatLauncher;
+  /**
+   * Model passed verbatim to `claude --model`. Accepts an alias (`opus` /
+   * `sonnet` / `haiku`) or a full name (e.g. `claude-opus-4-8`). OMIT to use
+   * claude's own default — do not send an empty string.
+   */
+  model?: string;
   allowedTools?: string[];
   disallowedTools?: string[];
 };
@@ -128,13 +134,14 @@ export async function chatDefaultCwd(): Promise<string> {
 }
 
 export async function chatCreateSession(opts: ChatCreateSessionOptions): Promise<string> {
-  const { cwd, permissionMode, launcher, allowedTools, disallowedTools } = opts;
+  const { cwd, permissionMode, launcher, model, allowedTools, disallowedTools } = opts;
   // Only forward optional keys when set, so the backend sees a clean input
-  // (and so an omitted launcher stays absent → backend "auto", rather than
-  // null/empty).
+  // (and so an omitted launcher/model stays absent → backend default, rather
+  // than null/empty).
   const input: Record<string, unknown> = { cwd };
   if (permissionMode) input.permissionMode = permissionMode;
   if (launcher) input.launcher = launcher;
+  if (model && model.trim().length > 0) input.model = model.trim();
   if (allowedTools && allowedTools.length > 0) input.allowedTools = allowedTools;
   if (disallowedTools && disallowedTools.length > 0) input.disallowedTools = disallowedTools;
   return invoke<string>("chat_create_session", { input });

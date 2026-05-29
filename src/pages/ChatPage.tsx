@@ -1,8 +1,8 @@
 // Usage: M0 chat page. One session per page load — no session tabs, no cwd
-// picker. A permission-mode and launcher selector sit above the transcript
-// (both fixed once the session exists). Calls `chat_create_session` on first
-// send, streams assistant text via `useChatEventStream`, and closes the
-// session on unmount.
+// picker. Permission-mode, launcher, and model selectors sit above the
+// transcript (all fixed once the session exists). Calls `chat_create_session`
+// on first send, streams assistant text via `useChatEventStream`, and closes
+// the session on unmount.
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -17,8 +17,11 @@ import { logToConsole } from "../services/consoleLog";
 import {
   appendUserMessage,
   resetChatStore,
+  resolveChatModel,
   setChatError,
   setChatLauncher,
+  setChatModel,
+  setChatModelCustom,
   setChatPermissionMode,
   setChatSessionId,
   setChatSessionPending,
@@ -26,6 +29,7 @@ import {
   type ChatMessage,
 } from "../stores/chatStore";
 import { ChatLauncherSelector } from "../components/chat/ChatLauncherSelector";
+import { ChatModelSelector } from "../components/chat/ChatModelSelector";
 import { ChatPermissionModeSelector } from "../components/chat/ChatPermissionModeSelector";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -78,8 +82,17 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 }
 
 export function ChatPage() {
-  const { sessionId, messages, sessionPending, sending, error, permissionMode, launcher } =
-    useChatStore();
+  const {
+    sessionId,
+    messages,
+    sessionPending,
+    sending,
+    error,
+    permissionMode,
+    launcher,
+    model,
+    modelCustom,
+  } = useChatStore();
   const [input, setInput] = useState("");
   // Track the latest sessionId via a ref so the unmount cleanup picks up
   // sessions created mid-lifetime without re-running on every change.
@@ -152,6 +165,9 @@ export function ChatPage() {
         // "auto" is a UI-only sentinel: omit the launcher so the backend
         // auto-selects (reclaude → claude).
         launcher: launcher === "auto" ? undefined : launcher,
+        // "default" (and a blank custom name) resolve to undefined → omit
+        // --model so claude uses its own default.
+        model: resolveChatModel(model, modelCustom),
       });
       setChatSessionId(newSessionId);
       activeSessionIdRef.current = newSessionId;
@@ -162,7 +178,7 @@ export function ChatPage() {
       setChatError(message);
       throw error;
     }
-  }, [cwd, permissionMode, launcher]);
+  }, [cwd, permissionMode, launcher, model, modelCustom]);
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
@@ -193,8 +209,8 @@ export function ChatPage() {
   );
 
   const sendDisabled = !input.trim() || sending || sessionPending || !cwd;
-  // Permission mode and launcher are fixed for the session lifetime (M0): lock
-  // both selectors as soon as a session exists or is being created.
+  // Permission mode, launcher, and model are fixed for the session lifetime
+  // (M0): lock the selectors as soon as a session exists or is being created.
   const sessionLocked = sessionId !== null || sessionPending;
   const statusLabel = sessionPending
     ? "会话启动中…"
@@ -208,8 +224,8 @@ export function ChatPage() {
     <div className="flex h-full flex-col gap-4 overflow-hidden">
       <PageHeader title="Chat" subtitle={`cwd: ${cwd ?? "解析中…"} · ${statusLabel}`} />
 
-      {/* Permission mode + launcher sit side-by-side. Both are fixed once the
-          session is created (M0), so they share the same lock condition. */}
+      {/* Permission mode + launcher + model sit side-by-side. All are fixed
+          once the session is created (M0), so they share the lock condition. */}
       <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
         <ChatPermissionModeSelector
           value={permissionMode}
@@ -219,6 +235,13 @@ export function ChatPage() {
         <ChatLauncherSelector
           value={launcher}
           onChange={setChatLauncher}
+          disabled={sessionLocked}
+        />
+        <ChatModelSelector
+          value={model}
+          custom={modelCustom}
+          onChange={setChatModel}
+          onCustomChange={setChatModelCustom}
           disabled={sessionLocked}
         />
       </div>

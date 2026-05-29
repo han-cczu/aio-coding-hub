@@ -273,6 +273,53 @@ describe("stores/chatStore", () => {
     expect(result.current.launcher).toBe("auto");
   });
 
+  it("defaults the model preset to default and updates preset + custom name", async () => {
+    const {
+      useChatStore,
+      setChatModel,
+      setChatModelCustom,
+      resetChatStore,
+      DEFAULT_CHAT_MODEL_PRESET,
+    } = await importFreshChatStore();
+    resetChatStore();
+
+    const { result } = renderHook(() => useChatStore());
+    expect(result.current.model).toBe(DEFAULT_CHAT_MODEL_PRESET);
+    expect(result.current.model).toBe("default");
+    expect(result.current.modelCustom).toBe("");
+
+    act(() => {
+      setChatModel("opus");
+    });
+    expect(result.current.model).toBe("opus");
+
+    act(() => {
+      setChatModel("custom");
+      setChatModelCustom("claude-opus-4-8");
+    });
+    expect(result.current.model).toBe("custom");
+    expect(result.current.modelCustom).toBe("claude-opus-4-8");
+  });
+
+  it("resolveChatModel maps the UI selection to the --model value (or omit)", async () => {
+    const { resolveChatModel } = await importFreshChatStore();
+
+    // default → omit the flag entirely.
+    expect(resolveChatModel("default", "")).toBeUndefined();
+    expect(resolveChatModel("default", "ignored")).toBeUndefined();
+
+    // aliases pass straight through.
+    expect(resolveChatModel("opus", "")).toBe("opus");
+    expect(resolveChatModel("sonnet", "")).toBe("sonnet");
+    expect(resolveChatModel("haiku", "")).toBe("haiku");
+
+    // custom uses the trimmed free-text name...
+    expect(resolveChatModel("custom", "  claude-opus-4-8  ")).toBe("claude-opus-4-8");
+    // ...but a blank/whitespace custom name falls back to omit.
+    expect(resolveChatModel("custom", "   ")).toBeUndefined();
+    expect(resolveChatModel("custom", "")).toBeUndefined();
+  });
+
   it("setChatSessionId clears the pending flag", async () => {
     const { useChatStore, setChatSessionPending, setChatSessionId, resetChatStore } =
       await importFreshChatStore();

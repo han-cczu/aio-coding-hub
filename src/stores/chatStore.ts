@@ -26,6 +26,31 @@ export type ChatLauncherChoice = "auto" | "reclaude" | "claude";
 /** Default launcher choice — let the backend auto-select. */
 export const DEFAULT_CHAT_LAUNCHER: ChatLauncherChoice = "auto";
 
+/**
+ * Model preset selected in the UI:
+ *   - `default` — UI-only sentinel; OMIT `--model` so claude uses its default.
+ *   - `opus` / `sonnet` / `haiku` — passed verbatim as a `claude --model` alias.
+ *   - `custom` — use the free-text `modelCustom` full name instead.
+ */
+export type ChatModelPreset = "default" | "opus" | "sonnet" | "haiku" | "custom";
+
+/** Default model preset — let claude pick. */
+export const DEFAULT_CHAT_MODEL_PRESET: ChatModelPreset = "default";
+
+/**
+ * Resolve the UI model selection to the value sent to `claude --model`, or
+ * `undefined` to omit the flag entirely. `custom` with a blank box falls back
+ * to omit (claude default), mirroring how the backend treats blank as unset.
+ */
+export function resolveChatModel(preset: ChatModelPreset, custom: string): string | undefined {
+  if (preset === "default") return undefined;
+  if (preset === "custom") {
+    const trimmed = custom.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+  }
+  return preset;
+}
+
 export type ChatMessage = {
   /** Local monotonically increasing id; not the SDK message id. */
   id: string;
@@ -58,6 +83,13 @@ export type ChatStoreSnapshot = {
    * lifetime rule as `permissionMode`: editable until the session exists.
    */
   launcher: ChatLauncherChoice;
+  /**
+   * Model preset chosen for this chat. Same lifetime rule as `permissionMode`.
+   * `custom` defers to `modelCustom`.
+   */
+  model: ChatModelPreset;
+  /** Free-text full model name, used only when `model === "custom"`. */
+  modelCustom: string;
 };
 
 type Listener = () => void;
@@ -72,6 +104,8 @@ const INITIAL_STATE: ChatStoreState = {
   error: null,
   permissionMode: DEFAULT_CHAT_PERMISSION_MODE,
   launcher: DEFAULT_CHAT_LAUNCHER,
+  model: DEFAULT_CHAT_MODEL_PRESET,
+  modelCustom: "",
 };
 
 let state: ChatStoreState = INITIAL_STATE;
@@ -145,6 +179,21 @@ export function setChatPermissionMode(mode: ChatPermissionMode) {
 export function setChatLauncher(launcher: ChatLauncherChoice) {
   if (state.launcher === launcher) return;
   setState({ ...state, launcher });
+}
+
+/**
+ * Update the model preset for the (not-yet-created) session. Same gating
+ * contract as {@link setChatPermissionMode}.
+ */
+export function setChatModel(model: ChatModelPreset) {
+  if (state.model === model) return;
+  setState({ ...state, model });
+}
+
+/** Update the free-text custom model name (only used when `model === "custom"`). */
+export function setChatModelCustom(modelCustom: string) {
+  if (state.modelCustom === modelCustom) return;
+  setState({ ...state, modelCustom });
 }
 
 /**

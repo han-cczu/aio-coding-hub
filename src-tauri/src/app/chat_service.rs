@@ -105,6 +105,11 @@ struct ChatExitPayload {
 ///
 /// On spawn failure the session is not registered, so the frontend can
 /// retry without leaking a half-open entry.
+// The per-session knobs (cwd + permission/tool/launcher/model overrides) are a
+// flat list mirroring `ChatCreateSessionInput`; grouping them into a struct
+// would only move the noise, so we follow the crate-wide convention of allowing
+// the lint here.
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn create_session<R: tauri::Runtime>(
     service: Arc<ChatService>,
     app: tauri::AppHandle<R>,
@@ -113,6 +118,7 @@ pub(crate) async fn create_session<R: tauri::Runtime>(
     allowed_tools: Vec<String>,
     disallowed_tools: Vec<String>,
     launcher: Option<String>,
+    model: Option<String>,
 ) -> AppResult<String> {
     let cwd = validate_cwd(&app, &cwd)?;
     let session_id = generate_uuid_v4();
@@ -134,6 +140,7 @@ pub(crate) async fn create_session<R: tauri::Runtime>(
         cwd: cwd.to_string_lossy().into_owned(),
         session_id: session_id.clone(),
         permission_mode: normalize_permission_mode(permission_mode),
+        model: normalize_model(model),
         allowed_tools: sanitize_tools(allowed_tools),
         disallowed_tools: sanitize_tools(disallowed_tools),
         // M0 grants no extra read roots beyond `cwd`; M1 will surface a picker.
@@ -277,6 +284,16 @@ fn launcher_not_found_message(preferred: Option<&str>) -> String {
 /// process module can simply omit the `--permission-mode` flag.
 fn normalize_permission_mode(mode: Option<String>) -> Option<String> {
     mode.map(|m| m.trim().to_string()).filter(|m| !m.is_empty())
+}
+
+/// Trim a `model` string and treat blank/empty as "unset" so the process
+/// module can simply omit the `--model` flag and let `claude` pick its
+/// default. Any non-blank value is forwarded verbatim (the model alias /
+/// id is validated upstream by `claude`, not here).
+fn normalize_model(model: Option<String>) -> Option<String> {
+    model
+        .map(|m| m.trim().to_string())
+        .filter(|m| !m.is_empty())
 }
 
 /// Drop blank tool names that would otherwise become empty `--allowedTools`
@@ -481,6 +498,22 @@ mod tests {
         assert_eq!(
             normalize_permission_mode(Some("  acceptEdits  ".to_string())),
             Some("acceptEdits".to_string())
+        );
+    }
+
+    #[test]
+    fn normalize_model_treats_blank_as_unset_and_trims() {
+        assert_eq!(normalize_model(None), None);
+        assert_eq!(normalize_model(Some(String::new())), None);
+        assert_eq!(normalize_model(Some("   ".to_string())), None);
+        assert_eq!(
+            normalize_model(Some("  claude-sonnet-4-6  ".to_string())),
+            Some("claude-sonnet-4-6".to_string())
+        );
+        // A bare alias is forwarded verbatim (validated upstream by claude).
+        assert_eq!(
+            normalize_model(Some("opus".to_string())),
+            Some("opus".to_string())
         );
     }
 

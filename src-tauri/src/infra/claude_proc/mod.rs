@@ -24,6 +24,7 @@
 //! claude --output-format stream-json --verbose --input-format stream-json
 //!        --include-partial-messages
 //!        --session-id <UUID>
+//!        [--model <alias|full-name>]
 //!        [--permission-mode <mode>]
 //!        [--allowedTools <t1,t2,...>] [--disallowedTools <...>]
 //!        [--add-dir <dir>]...
@@ -68,6 +69,10 @@ pub(crate) struct ClaudeProcConfig {
     pub cwd: String,
     /// Session UUID passed via `--session-id`.
     pub session_id: String,
+    /// Optional `--model` value: an alias (`opus` / `sonnet` / `haiku`) or a
+    /// full name (e.g. `claude-opus-4-8`). `None` omits the flag, letting the
+    /// CLI use its configured default.
+    pub model: Option<String>,
     /// Optional `--permission-mode` value (e.g. `plan`, `acceptEdits`).
     /// `None` omits the flag entirely.
     pub permission_mode: Option<String>,
@@ -274,6 +279,16 @@ fn build_args(config: &ClaudeProcConfig) -> Vec<String> {
         config.session_id.clone(),
     ];
 
+    if let Some(model) = config
+        .model
+        .as_deref()
+        .map(str::trim)
+        .filter(|m| !m.is_empty())
+    {
+        args.push("--model".to_string());
+        args.push(model.to_string());
+    }
+
     if let Some(mode) = config
         .permission_mode
         .as_deref()
@@ -406,6 +421,7 @@ mod tests {
             claude_path: "claude".to_string(),
             cwd: "/tmp/project".to_string(),
             session_id: "11111111-1111-1111-1111-111111111111".to_string(),
+            model: None,
             permission_mode: None,
             allowed_tools: Vec::new(),
             disallowed_tools: Vec::new(),
@@ -446,6 +462,47 @@ mod tests {
         // It must not drag in `--print` / `-p`: the resident stdin path honours
         // partial messages without it (verified against real `claude` 2.1.x).
         assert!(!args.iter().any(|a| a == "--print" || a == "-p"));
+    }
+
+    #[test]
+    fn build_args_appends_model_when_set() {
+        let mut config = base_config();
+        config.model = Some("opus".to_string());
+        let args = build_args(&config);
+        let idx = args
+            .iter()
+            .position(|a| a == "--model")
+            .expect("--model present");
+        assert_eq!(args[idx + 1], "opus");
+    }
+
+    #[test]
+    fn build_args_accepts_full_model_name() {
+        let mut config = base_config();
+        config.model = Some("claude-opus-4-8".to_string());
+        let args = build_args(&config);
+        let idx = args
+            .iter()
+            .position(|a| a == "--model")
+            .expect("--model present");
+        assert_eq!(args[idx + 1], "claude-opus-4-8");
+    }
+
+    #[test]
+    fn build_args_omits_model_when_unset() {
+        let args = build_args(&base_config());
+        assert!(
+            !args.iter().any(|a| a == "--model"),
+            "expected no --model in {args:?}"
+        );
+    }
+
+    #[test]
+    fn build_args_omits_blank_model() {
+        let mut config = base_config();
+        config.model = Some("   ".to_string());
+        let args = build_args(&config);
+        assert!(!args.iter().any(|a| a == "--model"));
     }
 
     #[test]
