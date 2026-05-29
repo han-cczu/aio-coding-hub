@@ -1,5 +1,6 @@
 // Usage: M0 chat page. One session per page load — no session tabs, no cwd
-// picker, no tool / permission UX. Calls `chat_create_session` on first
+// picker. A permission-mode and launcher selector sit above the transcript
+// (both fixed once the session exists). Calls `chat_create_session` on first
 // send, streams assistant text via `useChatEventStream`, and closes the
 // session on unmount.
 
@@ -17,12 +18,14 @@ import {
   appendUserMessage,
   resetChatStore,
   setChatError,
+  setChatLauncher,
   setChatPermissionMode,
   setChatSessionId,
   setChatSessionPending,
   useChatStore,
   type ChatMessage,
 } from "../stores/chatStore";
+import { ChatLauncherSelector } from "../components/chat/ChatLauncherSelector";
 import { ChatPermissionModeSelector } from "../components/chat/ChatPermissionModeSelector";
 import { Button } from "../ui/Button";
 import { Card } from "../ui/Card";
@@ -75,7 +78,8 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 }
 
 export function ChatPage() {
-  const { sessionId, messages, sessionPending, sending, error, permissionMode } = useChatStore();
+  const { sessionId, messages, sessionPending, sending, error, permissionMode, launcher } =
+    useChatStore();
   const [input, setInput] = useState("");
   // Track the latest sessionId via a ref so the unmount cleanup picks up
   // sessions created mid-lifetime without re-running on every change.
@@ -142,7 +146,13 @@ export function ChatPage() {
     }
     setChatSessionPending(true);
     try {
-      const newSessionId = await chatCreateSession({ cwd, permissionMode });
+      const newSessionId = await chatCreateSession({
+        cwd,
+        permissionMode,
+        // "auto" is a UI-only sentinel: omit the launcher so the backend
+        // auto-selects (reclaude → claude).
+        launcher: launcher === "auto" ? undefined : launcher,
+      });
       setChatSessionId(newSessionId);
       activeSessionIdRef.current = newSessionId;
       return newSessionId;
@@ -152,7 +162,7 @@ export function ChatPage() {
       setChatError(message);
       throw error;
     }
-  }, [cwd, permissionMode]);
+  }, [cwd, permissionMode, launcher]);
 
   const handleSend = useCallback(async () => {
     const trimmed = input.trim();
@@ -183,6 +193,9 @@ export function ChatPage() {
   );
 
   const sendDisabled = !input.trim() || sending || sessionPending || !cwd;
+  // Permission mode and launcher are fixed for the session lifetime (M0): lock
+  // both selectors as soon as a session exists or is being created.
+  const sessionLocked = sessionId !== null || sessionPending;
   const statusLabel = sessionPending
     ? "会话启动中…"
     : sending
@@ -195,13 +208,20 @@ export function ChatPage() {
     <div className="flex h-full flex-col gap-4 overflow-hidden">
       <PageHeader title="Chat" subtitle={`cwd: ${cwd ?? "解析中…"} · ${statusLabel}`} />
 
-      <ChatPermissionModeSelector
-        value={permissionMode}
-        onChange={setChatPermissionMode}
-        // Mode is fixed once the session is created (M0). Lock the selector
-        // as soon as a session exists or is being created.
-        disabled={sessionId !== null || sessionPending}
-      />
+      {/* Permission mode + launcher sit side-by-side. Both are fixed once the
+          session is created (M0), so they share the same lock condition. */}
+      <div className="flex flex-wrap items-start gap-x-8 gap-y-3">
+        <ChatPermissionModeSelector
+          value={permissionMode}
+          onChange={setChatPermissionMode}
+          disabled={sessionLocked}
+        />
+        <ChatLauncherSelector
+          value={launcher}
+          onChange={setChatLauncher}
+          disabled={sessionLocked}
+        />
+      </div>
 
       <Card padding="none" className="flex min-h-0 flex-1 flex-col overflow-hidden">
         <div

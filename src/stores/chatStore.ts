@@ -15,6 +15,17 @@ export type ChatRole = "user" | "assistant";
  */
 export const DEFAULT_CHAT_PERMISSION_MODE: ChatPermissionMode = "default";
 
+/**
+ * Launcher choice as held in the UI. `"auto"` is a UI-only sentinel — when the
+ * session is created it maps to OMITTING the launcher field so the backend
+ * auto-selects (`reclaude` preferred, falling back to `claude`). The explicit
+ * `"reclaude"` / `"claude"` values map straight through to the IPC `launcher`.
+ */
+export type ChatLauncherChoice = "auto" | "reclaude" | "claude";
+
+/** Default launcher choice — let the backend auto-select. */
+export const DEFAULT_CHAT_LAUNCHER: ChatLauncherChoice = "auto";
+
 export type ChatMessage = {
   /** Local monotonically increasing id; not the SDK message id. */
   id: string;
@@ -42,6 +53,11 @@ export type ChatStoreSnapshot = {
    * mode for the session lifetime).
    */
   permissionMode: ChatPermissionMode;
+  /**
+   * Launcher chosen for this chat (`auto` / `reclaude` / `claude`). Same
+   * lifetime rule as `permissionMode`: editable until the session exists.
+   */
+  launcher: ChatLauncherChoice;
 };
 
 type Listener = () => void;
@@ -55,6 +71,7 @@ const INITIAL_STATE: ChatStoreState = {
   sending: false,
   error: null,
   permissionMode: DEFAULT_CHAT_PERMISSION_MODE,
+  launcher: DEFAULT_CHAT_LAUNCHER,
 };
 
 let state: ChatStoreState = INITIAL_STATE;
@@ -119,6 +136,15 @@ export function setChatError(error: string | null) {
 export function setChatPermissionMode(mode: ChatPermissionMode) {
   if (state.permissionMode === mode) return;
   setState({ ...state, permissionMode: mode });
+}
+
+/**
+ * Update the launcher choice for the (not-yet-created) session. Same gating
+ * contract as {@link setChatPermissionMode}.
+ */
+export function setChatLauncher(launcher: ChatLauncherChoice) {
+  if (state.launcher === launcher) return;
+  setState({ ...state, launcher });
 }
 
 /**
@@ -187,6 +213,41 @@ function extractTextFromBlocks(blocks: ChatSdkContentBlock[] | undefined): strin
   return out;
 }
 
+/**
+ * Pull a streaming text token out of a Claude `stream_event` partial.
+ *
+ * Field path is the empirically-captured shape (not inferred):
+ *   { type:"stream_event", event:{ type:"content_block_delta",
+ *       delta:{ type:"text_delta", text:"…" } } }
+ *
+ * Returns "" for any other stream_event (message_start, content_block_start,
+ * input_json_delta for tool args, message_delta/stop, …) so they're ignored.
+ */
+function extractStreamTextDelta(event: ChatSdkEvent): string {
+  if (event.type !== "stream_event") return "";
+  const inner = event.event;
+  if (!inner || inner.type !== "content_block_delta") return "";
+  const delta = inner.delta;
+  if (!delta || delta.type !== "text_delta") return "";
+  return typeof delta.text === "string" ? delta.text : "";
+}
+
+/**
+ * Replace (set, not append) the current streaming assistant message's text
+ * with an authoritative full value — used when the turn's complete
+ * `type:"assistant"` snapshot arrives, to correct any delta drift. Creates a
+ * fresh streaming assistant message if none is in flight (e.g. a backend that
+ * doesn't emit partial token events at all).
+ */
+function setTextOnStreamingAssistant(messages: ChatMessage[], fullText: string): ChatMessage[] {
+  const ensured = ensureStreamingAssistant(messages);
+  const target = ensured.messages[ensured.index];
+  if (target.text === fullText) return ensured.messages;
+  const nextMessages = ensured.messages.slice();
+  nextMessages[ensured.index] = { ...target, text: fullText };
+  return nextMessages;
+}
+
 function finalizeStreamingAssistant(messages: ChatMessage[]): ChatMessage[] {
   if (messages.length === 0) return messages;
   const lastIndex = messages.length - 1;
@@ -200,20 +261,41 @@ function finalizeStreamingAssistant(messages: ChatMessage[]): ChatMessage[] {
 /**
  * Ingest a Claude Agent SDK event forwarded over `chat-event-{session_id}`.
  *
- * M0 surfaces only assistant text. Other event types (system, user, result,
- * tool_use, …) are recognised enough to flip `sending` off when the turn
- * ends; the rest is intentionally ignored until M1.
+ * Text rendering follows the empirically-confirmed stream-json shapes:
+ *   - `stream_event` → `content_block_delta` → `text_delta`: append the token
+ *     to the in-flight assistant message for live typewriter output (the
+ *     message is created on the first delta).
+ *   - `assistant` (turn-complete snapshot): SET (replace) the assistant text
+ *     with the authoritative full value, correcting any delta drift. We do
+ *     NOT append here — appending after delta accumulation would double the
+ *     text ("你好你好").
+ *   - `result` / `result_end`: end the turn (`streaming=false`, `sending` off).
+ *
+ * Everything else (system init/status, rate_limit_event, tool_use snapshots,
+ * message_start/stop partials, …) is intentionally ignored in M0.
  */
 export function ingestChatEvent(event: ChatSdkEvent | null | undefined) {
   if (!event || typeof event !== "object") return;
   const type = typeof event.type === "string" ? event.type : "";
 
+  if (type === "stream_event") {
+    const delta = extractStreamTextDelta(event);
+    if (!delta) return;
+    setState({
+      ...state,
+      messages: appendTextToAssistant(state.messages, delta),
+    });
+    return;
+  }
+
   if (type === "assistant") {
     const text = extractTextFromBlocks(event.message?.content);
+    // Tool-use-only snapshots carry no text — skip them so they don't wipe
+    // the streamed buffer with an empty string.
     if (!text) return;
     setState({
       ...state,
-      messages: appendTextToAssistant(state.messages, text),
+      messages: setTextOnStreamingAssistant(state.messages, text),
     });
     return;
   }

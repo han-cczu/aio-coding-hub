@@ -7,12 +7,38 @@ import { invoke } from "@tauri-apps/api/core";
 /**
  * Subset of an SDK message forwarded over the `chat-event-{session_id}`
  * channel. The sidecar relays the raw Claude Agent SDK event JSON, so the
- * shape is intentionally permissive: only the discriminator and message
- * payload are typed, every other field is opaque.
+ * shape is intentionally permissive: only the fields we read are typed,
+ * every other field is opaque.
+ *
+ * Two delivery shapes matter for rendering text:
+ *   - `type:"assistant"` carries a complete `message` snapshot for the turn
+ *     (`message.content[]` with text blocks) — the authoritative full text.
+ *   - `type:"stream_event"` carries incremental partials in `event`; we read
+ *     `content_block_delta` / `text_delta` tokens from there for live typing.
  */
 export type ChatSdkEvent = {
   type?: string;
   message?: ChatSdkAssistantMessage;
+  /** Present on `type:"stream_event"` partials (Anthropic streaming envelope). */
+  event?: ChatSdkStreamEvent;
+  [key: string]: unknown;
+};
+
+/**
+ * Inner Anthropic streaming event carried by a `type:"stream_event"` envelope.
+ * Mirrors the SSE message shape (`content_block_delta`, `message_start`, …).
+ * Only the `content_block_delta` text path is typed; the rest is opaque.
+ */
+export type ChatSdkStreamEvent = {
+  type?: string;
+  index?: number;
+  delta?: ChatSdkStreamDelta;
+  [key: string]: unknown;
+};
+
+export type ChatSdkStreamDelta = {
+  type?: string;
+  text?: string;
   [key: string]: unknown;
 };
 
@@ -56,13 +82,25 @@ export type ChatPermissionMode =
   | "bypassPermissions";
 
 /**
- * Options for `chat_create_session`. The permission mode (and optional
- * tool allow/deny lists) are fixed for the lifetime of the session in M0;
- * changing mode mid-session is a later milestone.
+ * Launcher used to spawn the session's `claude` process. These are the only
+ * two values the backend `normalize_launcher` accepts verbatim:
+ *   - `reclaude` — force the user's launcher (runs an auth/config sync, then
+ *     delegates to `claude`).
+ *   - `claude`   — connect directly, skipping that sync.
+ * "Auto" is expressed by OMITTING the field entirely, which lets the backend
+ * pick (env override → `reclaude` → `claude`). Do not send `"auto"` as a value.
+ */
+export type ChatLauncher = "reclaude" | "claude";
+
+/**
+ * Options for `chat_create_session`. The permission mode, launcher, and
+ * optional tool allow/deny lists are fixed for the lifetime of the session in
+ * M0; changing them mid-session is a later milestone.
  */
 export type ChatCreateSessionOptions = {
   cwd: string;
   permissionMode?: ChatPermissionMode;
+  launcher?: ChatLauncher;
   allowedTools?: string[];
   disallowedTools?: string[];
 };
@@ -90,11 +128,13 @@ export async function chatDefaultCwd(): Promise<string> {
 }
 
 export async function chatCreateSession(opts: ChatCreateSessionOptions): Promise<string> {
-  const { cwd, permissionMode, allowedTools, disallowedTools } = opts;
+  const { cwd, permissionMode, launcher, allowedTools, disallowedTools } = opts;
   // Only forward optional keys when set, so the backend sees a clean input
-  // (and so a `default`-equivalent omission stays absent rather than null).
+  // (and so an omitted launcher stays absent → backend "auto", rather than
+  // null/empty).
   const input: Record<string, unknown> = { cwd };
   if (permissionMode) input.permissionMode = permissionMode;
+  if (launcher) input.launcher = launcher;
   if (allowedTools && allowedTools.length > 0) input.allowedTools = allowedTools;
   if (disallowedTools && disallowedTools.length > 0) input.disallowedTools = disallowedTools;
   return invoke<string>("chat_create_session", { input });

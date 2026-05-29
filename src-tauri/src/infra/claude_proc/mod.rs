@@ -22,16 +22,19 @@
 //!
 //! ```text
 //! claude --output-format stream-json --verbose --input-format stream-json
+//!        --include-partial-messages
 //!        --session-id <UUID>
 //!        [--permission-mode <mode>]
 //!        [--allowedTools <t1,t2,...>] [--disallowedTools <...>]
 //!        [--add-dir <dir>]...
 //! ```
 //!
-//! There is no `--print` / `-p`: the SDK's base argv is exactly
-//! `--output-format stream-json --verbose --input-format stream-json`, and the
-//! presence of `--input-format stream-json` is what puts the CLI into resident
-//! stdin-reading mode. Each user turn is one stdin line:
+//! There is no `--print` / `-p`: the SDK's base argv is the stream-json
+//! quartet, and the presence of `--input-format stream-json` is what puts the
+//! CLI into resident stdin-reading mode. `--include-partial-messages` makes the
+//! CLI emit incremental `content_block_delta` events for token-by-token UI
+//! streaming (also confirmed to work without `--print`). Each user turn is one
+//! stdin line:
 //!
 //! ```json
 //! {"type":"user","message":{"role":"user","content":[{"type":"text","text":"<content>"}]}}
@@ -260,6 +263,13 @@ fn build_args(config: &ClaudeProcConfig) -> Vec<String> {
         "--verbose".to_string(),
         "--input-format".to_string(),
         "stream-json".to_string(),
+        // Emit incremental `content_block_delta` events so the chat UI streams
+        // assistant text token-by-token instead of one block at a time. The
+        // CLI's `--help` claims this needs `--print`, but that constraint is
+        // stale for the stream-json-input resident path — confirmed by a real
+        // `claude` 2.1.x run that accepted the flag and produced live deltas
+        // without `--print`.
+        "--include-partial-messages".to_string(),
         "--session-id".to_string(),
         config.session_id.clone(),
     ];
@@ -414,12 +424,27 @@ mod tests {
                 "--verbose",
                 "--input-format",
                 "stream-json",
+                "--include-partial-messages",
                 "--session-id",
                 "11111111-1111-1111-1111-111111111111",
             ]
         );
         // Path B never passes `--print` / `-p`; resident stdin mode is driven
         // purely by `--input-format stream-json`.
+        assert!(!args.iter().any(|a| a == "--print" || a == "-p"));
+    }
+
+    #[test]
+    fn build_args_always_requests_partial_messages_without_print() {
+        // Token-by-token streaming is mandatory for the chat UI, so the flag is
+        // emitted unconditionally — even with no permission/tool/dir options.
+        let args = build_args(&base_config());
+        assert!(
+            args.iter().any(|a| a == "--include-partial-messages"),
+            "expected --include-partial-messages in {args:?}"
+        );
+        // It must not drag in `--print` / `-p`: the resident stdin path honours
+        // partial messages without it (verified against real `claude` 2.1.x).
         assert!(!args.iter().any(|a| a == "--print" || a == "-p"));
     }
 

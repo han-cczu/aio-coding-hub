@@ -112,17 +112,20 @@ pub(crate) async fn create_session<R: tauri::Runtime>(
     permission_mode: Option<String>,
     allowed_tools: Vec<String>,
     disallowed_tools: Vec<String>,
+    launcher: Option<String>,
 ) -> AppResult<String> {
     let cwd = validate_cwd(&app, &cwd)?;
     let session_id = generate_uuid_v4();
 
-    let claude_path = resolve_chat_launcher_path().ok_or_else(|| {
+    let preferred = normalize_launcher(launcher);
+    let claude_path = resolve_chat_launcher_path(preferred).ok_or_else(|| {
         // Distinct from the process-down codes claude_proc returns: this is a
         // setup error (no launcher on PATH), so the frontend can prompt the
-        // user to install/locate the CLI rather than retry the spawn.
+        // user to install/locate the CLI rather than retry the spawn. The
+        // message names exactly what was requested (reclaude/claude/either).
         AppError::new(
             "CHAT_CLAUDE_NOT_FOUND",
-            "could not locate `reclaude` or `claude` on PATH".to_string(),
+            launcher_not_found_message(preferred),
         )
     })?;
 
@@ -183,29 +186,48 @@ pub(crate) fn default_cwd<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> AppRe
 
 /// Resolve the launcher used to start a chat session's `claude` process.
 ///
-/// Preference order:
-/// 1. `AIO_CHAT_CLAUDE_LAUNCHER` env var (absolute path) — explicit override
-///    for CI / non-standard installs.
-/// 2. `reclaude` on PATH — the user's normal launcher. It performs a config
-///    sync (auth / endpoint setup, printed as a `同步配置…` line on **stderr**,
-///    which `claude_proc` drains to the log rather than surfacing as an error)
-///    then delegates to `claude`, forwarding every argument verbatim. Spawning
-///    it makes chat use the exact launch path the user uses interactively, so
-///    authentication and config match — a bare `claude` skips that sync and can
-///    fail with 401.
-/// 3. `claude` on PATH — fallback when `reclaude` is not installed.
+/// `preferred` lets the frontend force a specific launcher (see
+/// [`normalize_launcher`] for the accepted values):
+/// - `Some("reclaude")` — scan PATH for `reclaude` **only**; `None` if absent.
+/// - `Some("claude")` — scan PATH for `claude` **only**; `None` if absent.
+/// - `None` (auto) — the default order:
+///   1. `AIO_CHAT_CLAUDE_LAUNCHER` env var (absolute path) — explicit override
+///      for CI / non-standard installs.
+///   2. `reclaude` on PATH — the user's normal launcher. It performs a config
+///      sync (auth / endpoint setup, printed as a `同步配置…` line on **stderr**,
+///      which `claude_proc` drains to the log rather than surfacing as an error)
+///      then delegates to `claude`, forwarding every argument verbatim. Spawning
+///      it makes chat use the exact launch path the user uses interactively, so
+///      authentication and config match — a bare `claude` skips that sync and
+///      can fail with 401.
+///   3. `claude` on PATH — fallback when `reclaude` is not installed.
 ///
+/// The `AIO_CHAT_CLAUDE_LAUNCHER` override only applies to auto: an explicit
+/// `reclaude`/`claude` request is honoured verbatim so the user's choice wins.
 /// PATH-only scanning is enough for production users (these launchers add
 /// themselves to PATH); returns `None` when nothing is found so the caller can
 /// surface a clear setup error.
-fn resolve_chat_launcher_path() -> Option<String> {
-    if let Some(override_path) = std::env::var_os("AIO_CHAT_CLAUDE_LAUNCHER") {
-        let candidate = PathBuf::from(override_path);
-        if candidate.is_file() {
-            return Some(candidate.to_string_lossy().into_owned());
+fn resolve_chat_launcher_path(preferred: Option<&str>) -> Option<String> {
+    match preferred {
+        Some("reclaude") => find_launcher_on_path(&["reclaude"]),
+        Some("claude") => find_launcher_on_path(&["claude"]),
+        // Auto: env override first, then prefer `reclaude` over `claude`.
+        _ => {
+            if let Some(override_path) = std::env::var_os("AIO_CHAT_CLAUDE_LAUNCHER") {
+                let candidate = PathBuf::from(override_path);
+                if candidate.is_file() {
+                    return Some(candidate.to_string_lossy().into_owned());
+                }
+            }
+            find_launcher_on_path(&["reclaude", "claude"])
         }
     }
+}
 
+/// Scan PATH for the first existing launcher among `bases`, trying each
+/// platform executable extension. `bases` is searched in order, so the caller
+/// controls preference (e.g. `["reclaude", "claude"]` prefers `reclaude`).
+fn find_launcher_on_path(bases: &[&str]) -> Option<String> {
     let exts: &[&str] = if cfg!(windows) {
         &[".cmd", ".exe", ".ps1", ""]
     } else {
@@ -215,8 +237,7 @@ fn resolve_chat_launcher_path() -> Option<String> {
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
 
-    // `reclaude` is preferred over `claude` across all PATH directories.
-    for base in ["reclaude", "claude"] {
+    for base in bases {
         for dir in &dirs {
             for ext in exts {
                 let candidate = dir.join(format!("{base}{ext}"));
@@ -227,6 +248,29 @@ fn resolve_chat_launcher_path() -> Option<String> {
         }
     }
     None
+}
+
+/// Normalise the frontend `launcher` field to a known launcher base name.
+///
+/// Accepts `"reclaude"` / `"claude"` (case-sensitive, trimmed); blank or any
+/// unrecognised value maps to `None` (auto), since the IPC contract only ever
+/// sends those two values and falling back to auto is safer than failing on a
+/// typo or running an arbitrary binary name.
+fn normalize_launcher(launcher: Option<String>) -> Option<&'static str> {
+    match launcher.as_deref().map(str::trim) {
+        Some("reclaude") => Some("reclaude"),
+        Some("claude") => Some("claude"),
+        _ => None,
+    }
+}
+
+/// Human-readable "not found" message naming exactly what was searched for, so
+/// the frontend can tell the user which launcher to install/locate.
+fn launcher_not_found_message(preferred: Option<&str>) -> String {
+    match preferred {
+        Some(name) => format!("could not locate `{name}` on PATH"),
+        None => "could not locate `reclaude` or `claude` on PATH".to_string(),
+    }
 }
 
 /// Trim a `permission_mode` string and treat blank/empty as "unset" so the
@@ -395,6 +439,7 @@ fn generate_uuid_v4() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
 
     #[test]
     fn generate_uuid_v4_produces_correct_format() {
@@ -450,6 +495,40 @@ mod tests {
         assert_eq!(
             sanitize_tools(input),
             vec!["Read".to_string(), "Bash".to_string()]
+        );
+    }
+
+    #[test]
+    fn normalize_launcher_maps_known_values_and_defaults_to_auto() {
+        assert_eq!(normalize_launcher(None), None);
+        assert_eq!(normalize_launcher(Some(String::new())), None);
+        assert_eq!(normalize_launcher(Some("   ".to_string())), None);
+        // Unrecognised values fall back to auto rather than failing.
+        assert_eq!(normalize_launcher(Some("codex".to_string())), None);
+        assert_eq!(normalize_launcher(Some("Claude".to_string())), None);
+        assert_eq!(
+            normalize_launcher(Some("reclaude".to_string())),
+            Some("reclaude")
+        );
+        assert_eq!(
+            normalize_launcher(Some("  claude  ".to_string())),
+            Some("claude")
+        );
+    }
+
+    #[test]
+    fn launcher_not_found_message_names_the_requested_launcher() {
+        assert_eq!(
+            launcher_not_found_message(Some("reclaude")),
+            "could not locate `reclaude` on PATH"
+        );
+        assert_eq!(
+            launcher_not_found_message(Some("claude")),
+            "could not locate `claude` on PATH"
+        );
+        assert_eq!(
+            launcher_not_found_message(None),
+            "could not locate `reclaude` or `claude` on PATH"
         );
     }
 
@@ -535,5 +614,130 @@ mod tests {
         let service = Arc::new(ChatService::default());
         let result = close_session(service, "missing-session".to_string()).await;
         assert!(result.is_ok());
+    }
+
+    // ---- launcher resolution -------------------------------------------
+    //
+    // These mutate the process-wide `PATH` / `AIO_CHAT_CLAUDE_LAUNCHER` env
+    // vars, so they serialise on a shared guard and snapshot/restore both
+    // vars. All env-dependent values are captured *before* asserting, so a
+    // failed assertion never leaves the environment corrupted for other
+    // tests. No other test in the crate touches these vars.
+    use std::sync::Mutex as StdMutex;
+    static PATH_GUARD: StdMutex<()> = StdMutex::new(());
+
+    /// Primary on-disk filename the scanner looks for; `is_file` only needs
+    /// the file to exist, so one variant per platform is enough.
+    fn launcher_filename(base: &str) -> String {
+        if cfg!(windows) {
+            format!("{base}.cmd")
+        } else {
+            base.to_string()
+        }
+    }
+
+    fn write_fake_launcher(dir: &Path, base: &str) {
+        std::fs::write(dir.join(launcher_filename(base)), b"#!/bin/sh\n")
+            .expect("write fake launcher");
+    }
+
+    #[test]
+    fn resolve_chat_launcher_path_honours_explicit_preference() {
+        let _guard = PATH_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let prev_path = env::var_os("PATH");
+        let prev_override = env::var_os("AIO_CHAT_CLAUDE_LAUNCHER");
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fake_launcher(dir.path(), "reclaude");
+        write_fake_launcher(dir.path(), "claude");
+        // An env override must NOT leak into explicit requests.
+        env::set_var("AIO_CHAT_CLAUDE_LAUNCHER", "C:/nonexistent/override");
+        env::set_var("PATH", dir.path());
+
+        let reclaude = resolve_chat_launcher_path(Some("reclaude"));
+        let claude = resolve_chat_launcher_path(Some("claude"));
+
+        match prev_path {
+            Some(p) => env::set_var("PATH", p),
+            None => env::remove_var("PATH"),
+        }
+        match prev_override {
+            Some(p) => env::set_var("AIO_CHAT_CLAUDE_LAUNCHER", p),
+            None => env::remove_var("AIO_CHAT_CLAUDE_LAUNCHER"),
+        }
+
+        assert!(
+            reclaude
+                .as_deref()
+                .is_some_and(|p| p.ends_with(&launcher_filename("reclaude"))),
+            "expected reclaude path, got {reclaude:?}",
+        );
+        assert!(
+            claude
+                .as_deref()
+                .is_some_and(|p| p.ends_with(&launcher_filename("claude"))),
+            "expected claude path, got {claude:?}",
+        );
+    }
+
+    #[test]
+    fn resolve_chat_launcher_path_auto_prefers_reclaude() {
+        let _guard = PATH_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let prev_path = env::var_os("PATH");
+        let prev_override = env::var_os("AIO_CHAT_CLAUDE_LAUNCHER");
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        write_fake_launcher(dir.path(), "reclaude");
+        write_fake_launcher(dir.path(), "claude");
+        // Auto path with no override: reclaude wins over claude.
+        env::remove_var("AIO_CHAT_CLAUDE_LAUNCHER");
+        env::set_var("PATH", dir.path());
+
+        let auto = resolve_chat_launcher_path(None);
+
+        match prev_path {
+            Some(p) => env::set_var("PATH", p),
+            None => env::remove_var("PATH"),
+        }
+        if let Some(p) = prev_override {
+            env::set_var("AIO_CHAT_CLAUDE_LAUNCHER", p);
+        }
+
+        assert!(
+            auto.as_deref()
+                .is_some_and(|p| p.ends_with(&launcher_filename("reclaude"))),
+            "auto should prefer reclaude, got {auto:?}",
+        );
+    }
+
+    #[test]
+    fn resolve_chat_launcher_path_explicit_returns_none_when_absent() {
+        let _guard = PATH_GUARD.lock().unwrap_or_else(|e| e.into_inner());
+        let prev_path = env::var_os("PATH");
+        let prev_override = env::var_os("AIO_CHAT_CLAUDE_LAUNCHER");
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        // Only `claude` is present.
+        write_fake_launcher(dir.path(), "claude");
+        env::remove_var("AIO_CHAT_CLAUDE_LAUNCHER");
+        env::set_var("PATH", dir.path());
+
+        // Requesting reclaude must not silently fall back to claude.
+        let reclaude = resolve_chat_launcher_path(Some("reclaude"));
+        let claude = resolve_chat_launcher_path(Some("claude"));
+
+        match prev_path {
+            Some(p) => env::set_var("PATH", p),
+            None => env::remove_var("PATH"),
+        }
+        if let Some(p) = prev_override {
+            env::set_var("AIO_CHAT_CLAUDE_LAUNCHER", p);
+        }
+
+        assert!(
+            reclaude.is_none(),
+            "reclaude should be absent, got {reclaude:?}"
+        );
+        assert!(claude.is_some(), "claude should be found, got {claude:?}");
     }
 }

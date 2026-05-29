@@ -33,7 +33,7 @@ describe("stores/chatStore", () => {
     expect(result.current.error).toBeNull();
   });
 
-  it("accumulates assistant text from streaming SDK events", async () => {
+  it("treats each assistant snapshot as authoritative full text (set, not append)", async () => {
     const { useChatStore, appendUserMessage, ingestChatEvent, resetChatStore } =
       await importFreshChatStore();
     resetChatStore();
@@ -44,16 +44,19 @@ describe("stores/chatStore", () => {
       appendUserMessage("hi");
     });
 
+    // Each `assistant` event carries the *complete* message snapshot for the
+    // turn, so a later snapshot replaces (does not concatenate with) an
+    // earlier one.
     act(() => {
       ingestChatEvent({
         type: "assistant",
-        message: { role: "assistant", content: [{ type: "text", text: "Hello " }] },
+        message: { role: "assistant", content: [{ type: "text", text: "Hello" }] },
       });
     });
     act(() => {
       ingestChatEvent({
         type: "assistant",
-        message: { role: "assistant", content: [{ type: "text", text: "world" }] },
+        message: { role: "assistant", content: [{ type: "text", text: "Hello world" }] },
       });
     });
 
@@ -70,6 +73,117 @@ describe("stores/chatStore", () => {
 
     expect(result.current.messages[1].streaming).toBe(false);
     expect(result.current.sending).toBe(false);
+  });
+
+  it("appends text_delta tokens from stream_event partials", async () => {
+    const { useChatStore, appendUserMessage, ingestChatEvent, resetChatStore } =
+      await importFreshChatStore();
+    resetChatStore();
+
+    const { result } = renderHook(() => useChatStore());
+
+    act(() => {
+      appendUserMessage("hi");
+    });
+
+    // Real captured partial shape: stream_event > content_block_delta > text_delta.
+    act(() => {
+      ingestChatEvent({
+        type: "stream_event",
+        event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "你" } },
+      });
+    });
+    act(() => {
+      ingestChatEvent({
+        type: "stream_event",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "好" },
+        },
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(2);
+    const assistant = result.current.messages[1];
+    expect(assistant.role).toBe("assistant");
+    expect(assistant.text).toBe("你好");
+    expect(assistant.streaming).toBe(true);
+  });
+
+  it("does not double-count: delta tokens then a final assistant snapshot replaces", async () => {
+    const { useChatStore, appendUserMessage, ingestChatEvent, resetChatStore } =
+      await importFreshChatStore();
+    resetChatStore();
+
+    const { result } = renderHook(() => useChatStore());
+
+    act(() => {
+      appendUserMessage("hi");
+    });
+
+    // Stream the tokens "你好" live...
+    act(() => {
+      ingestChatEvent({
+        type: "stream_event",
+        event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "你" } },
+      });
+    });
+    act(() => {
+      ingestChatEvent({
+        type: "stream_event",
+        event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "好" } },
+      });
+    });
+    expect(result.current.messages[1].text).toBe("你好");
+
+    // ...then the turn-complete snapshot arrives with the same full text. It
+    // must REPLACE, not append — otherwise we'd see "你好你好".
+    act(() => {
+      ingestChatEvent({
+        type: "assistant",
+        message: { role: "assistant", content: [{ type: "text", text: "你好" }] },
+      });
+    });
+
+    expect(result.current.messages).toHaveLength(2);
+    expect(result.current.messages[1].text).toBe("你好");
+
+    act(() => {
+      ingestChatEvent({ type: "result" });
+    });
+    expect(result.current.messages[1].streaming).toBe(false);
+    expect(result.current.sending).toBe(false);
+  });
+
+  it("ignores non-text stream_event partials and other safe event types", async () => {
+    const { useChatStore, ingestChatEvent, resetChatStore } = await importFreshChatStore();
+    resetChatStore();
+
+    const { result } = renderHook(() => useChatStore());
+
+    act(() => {
+      // message_start / content_block_start envelopes carry no text_delta.
+      ingestChatEvent({ type: "stream_event", event: { type: "message_start" } });
+      ingestChatEvent({
+        type: "stream_event",
+        event: { type: "content_block_start", index: 0 },
+      });
+      // input_json_delta (tool args) is a delta but not a text_delta.
+      ingestChatEvent({
+        type: "stream_event",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "input_json_delta", partial_json: "{" },
+        },
+      });
+      // Unrelated top-level types.
+      ingestChatEvent({ type: "system", subtype: "init" });
+      ingestChatEvent({ type: "rate_limit_event" });
+    });
+
+    expect(result.current.messages).toEqual([]);
   });
 
   it("ignores assistant events with no text content blocks", async () => {
@@ -132,6 +246,31 @@ describe("stores/chatStore", () => {
       setChatPermissionMode("bypassPermissions");
     });
     expect(result.current.permissionMode).toBe("bypassPermissions");
+  });
+
+  it("defaults the launcher to auto and updates it via setChatLauncher", async () => {
+    const { useChatStore, setChatLauncher, resetChatStore, DEFAULT_CHAT_LAUNCHER } =
+      await importFreshChatStore();
+    resetChatStore();
+
+    const { result } = renderHook(() => useChatStore());
+    expect(result.current.launcher).toBe(DEFAULT_CHAT_LAUNCHER);
+    expect(result.current.launcher).toBe("auto");
+
+    act(() => {
+      setChatLauncher("reclaude");
+    });
+    expect(result.current.launcher).toBe("reclaude");
+
+    act(() => {
+      setChatLauncher("claude");
+    });
+    expect(result.current.launcher).toBe("claude");
+
+    act(() => {
+      setChatLauncher("auto");
+    });
+    expect(result.current.launcher).toBe("auto");
   });
 
   it("setChatSessionId clears the pending flag", async () => {

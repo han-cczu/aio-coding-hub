@@ -25,6 +25,10 @@ pub(crate) struct ChatCreateSessionInput {
     pub allowed_tools: Option<Vec<String>>,
     /// Tools to deny for this session (`--disallowedTools`).
     pub disallowed_tools: Option<Vec<String>>,
+    /// Which launcher to start the session with: `"reclaude"` or `"claude"`.
+    /// `None` (or any other value) means auto — prefer `reclaude`, fall back
+    /// to `claude` (honouring the `AIO_CHAT_CLAUDE_LAUNCHER` override).
+    pub launcher: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize, specta::Type)]
@@ -69,6 +73,7 @@ pub(crate) async fn chat_create_session(
         input.permission_mode,
         input.allowed_tools.unwrap_or_default(),
         input.disallowed_tools.unwrap_or_default(),
+        input.launcher,
     )
     .await
     .map_err(Into::into)
