@@ -313,6 +313,11 @@ pub(super) fn run_wsl_bash_script_capture(distro: &str, script: &str) -> AppResu
 }
 
 /// Read a file from WSL using base64 encoding. Returns None if file does not exist.
+///
+/// Unbounded companion to [`read_wsl_file_with_max_len`]; both delegate to
+/// `read_wsl_file_inner`. Currently no caller needs the unbounded read, but the
+/// overload is kept so the size-limited and unlimited reads stay a symmetric pair.
+#[allow(dead_code)]
 pub(super) fn read_wsl_file(distro: &str, path_expr: &str) -> AppResult<Option<Vec<u8>>> {
     read_wsl_file_inner(distro, path_expr, None)
 }
