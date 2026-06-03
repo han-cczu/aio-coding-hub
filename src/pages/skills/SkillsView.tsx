@@ -618,7 +618,7 @@ export function SkillsView({
                 return (
                   <div
                     key={skill.id}
-                    className="rounded-xl border border-border bg-white p-3 dark:border-border dark:bg-secondary"
+                    className="rounded-lg border border-line-subtle bg-card p-3"
                   >
                     <div className="flex items-start gap-3">
                       <input
@@ -634,33 +634,58 @@ export function SkillsView({
                         aria-label={`选择通用技能 ${skill.name}`}
                       />
 
-                      <div className="min-w-0 flex-1">
-                        {repoPrefix ? (
-                          <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                            {repoPrefix}
-                          </div>
-                        ) : null}
-                        <div className="flex items-center gap-2">
-                          <span className="min-w-0 truncate text-sm font-semibold">
-                            {displaySkillName(skill.name, skill.source_git_url)}
-                          </span>
-                          {updateInfoMap.get(skill.id)?.has_update ? (
-                            <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
-                              有更新
+                      <div className="flex min-w-0 flex-1 flex-col gap-2">
+                        {/* Title block */}
+                        <div className="min-w-0">
+                          {repoPrefix ? (
+                            <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                              {repoPrefix}
+                            </div>
+                          ) : null}
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="min-w-0 truncate text-sm font-semibold">
+                              {displaySkillName(skill.name, skill.source_git_url)}
                             </span>
-                          ) : null}
-                          {repoUrl ? (
-                            <a
-                              href={repoUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="shrink-0 text-muted-foreground hover:text-muted-foreground dark:text-muted-foreground dark:hover:text-muted-foreground"
-                              title={sourceHint(skill)}
+                            {updateInfoMap.get(skill.id)?.has_update ? (
+                              <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400">
+                                有更新
+                              </span>
+                            ) : null}
+                            {repoUrl ? (
+                              <a
+                                href={repoUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                                title={sourceHint(skill)}
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              </a>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {skill.description ? (
+                          <div className="text-xs text-muted-foreground">{skill.description}</div>
+                        ) : null}
+
+                        {/* Footer: meta on the left, actions aligned right on their own row */}
+                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                            <span
+                              className={cn(
+                                "rounded-full px-2 py-1 font-medium",
+                                skill.enabled
+                                  ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                                  : "bg-secondary text-muted-foreground"
+                              )}
                             >
-                              <ExternalLink className="h-3.5 w-3.5" />
-                            </a>
-                          ) : null}
-                          <div className="ms-auto flex flex-wrap items-center justify-end gap-2">
+                              {skill.enabled ? "已启用" : "未启用"}
+                            </span>
+                            <span>更新 {formatUnixSeconds(skill.updated_at)}</span>
+                          </div>
+
+                          <div className="flex shrink-0 items-center gap-2">
                             <span className="text-xs text-muted-foreground">启用</span>
                             <Switch
                               checked={skill.enabled}
@@ -722,24 +747,6 @@ export function SkillsView({
                               删除
                             </Button>
                           </div>
-                        </div>
-                        {skill.description ? (
-                          <div className="mt-1.5 text-xs text-muted-foreground">
-                            {skill.description}
-                          </div>
-                        ) : null}
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <span
-                            className={cn(
-                              "rounded-full px-2 py-1 font-medium",
-                              skill.enabled
-                                ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                                : "bg-secondary text-muted-foreground dark:bg-secondary dark:text-muted-foreground"
-                            )}
-                          >
-                            {skill.enabled ? "已启用" : "未启用"}
-                          </span>
-                          <span>更新 {formatUnixSeconds(skill.updated_at)}</span>
                         </div>
                       </div>
                     </div>
@@ -817,7 +824,7 @@ export function SkillsView({
                 return (
                   <div
                     key={skill.path}
-                    className="rounded-xl border border-border bg-secondary p-3 dark:border-border dark:bg-secondary"
+                    className="rounded-lg border border-line-subtle bg-card p-3"
                   >
                     <div className="flex items-start gap-3">
                       <input
@@ -829,28 +836,43 @@ export function SkillsView({
                         aria-label={`选择本机技能 ${label}`}
                       />
 
-                      <div className="min-w-0 flex-1">
-                        {repoPrefix ? (
-                          <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground">
-                            {repoPrefix}
-                          </div>
-                        ) : null}
-                        <div className="flex items-center gap-2">
-                          <span className="min-w-0 truncate text-sm font-semibold">
-                            {displayLabel}
-                          </span>
-                          {repoUrl ? (
-                            <a
-                              href={repoUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="shrink-0 text-muted-foreground hover:text-muted-foreground dark:text-muted-foreground dark:hover:text-muted-foreground"
-                              title={sourceHint(skill)}
-                            >
-                              <ExternalLink className="h-3.5 w-3.5" />
-                            </a>
+                      <div className="flex min-w-0 flex-1 flex-col gap-2">
+                        {/* Title block */}
+                        <div className="min-w-0">
+                          {repoPrefix ? (
+                            <div className="mb-1 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                              {repoPrefix}
+                            </div>
                           ) : null}
-                          <div className="ms-auto flex flex-wrap items-center justify-end gap-2">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <span className="min-w-0 truncate text-sm font-semibold">
+                              {displayLabel}
+                            </span>
+                            {repoUrl ? (
+                              <a
+                                href={repoUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+                                title={sourceHint(skill)}
+                              >
+                                <ExternalLink className="h-3.5 w-3.5" />
+                              </a>
+                            ) : null}
+                          </div>
+                        </div>
+
+                        {skill.description ? (
+                          <div className="text-xs text-muted-foreground">{skill.description}</div>
+                        ) : null}
+
+                        {/* Footer: path on the left, actions aligned right on their own row */}
+                        <div className="flex flex-wrap items-center justify-between gap-x-3 gap-y-2">
+                          <span className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
+                            {skill.path}
+                          </span>
+
+                          <div className="flex shrink-0 items-center gap-2">
                             {batchInitMode ? null : (
                               <Button
                                 size="sm"
@@ -878,14 +900,6 @@ export function SkillsView({
                               打开目录
                             </Button>
                           </div>
-                        </div>
-                        {skill.description ? (
-                          <div className="mt-1.5 text-xs text-muted-foreground">
-                            {skill.description}
-                          </div>
-                        ) : null}
-                        <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                          <span className="min-w-0 truncate font-mono">{skill.path}</span>
                         </div>
                       </div>
                     </div>
@@ -944,7 +958,7 @@ export function SkillsView({
           {localDeleteTargets.slice(0, 10).map((skill) => (
             <div
               key={skill.path}
-              className="rounded-xl border border-border bg-secondary p-3 dark:border-border dark:bg-secondary"
+              className="rounded-lg border border-line-subtle bg-secondary p-3"
             >
               <div className="font-medium text-foreground">{skill.name || skill.dir_name}</div>
               <div className="mt-1 break-all font-mono">{skill.path}</div>
