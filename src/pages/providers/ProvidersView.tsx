@@ -12,7 +12,7 @@ import { EmptyState } from "../../ui/EmptyState";
 import { Input } from "../../ui/Input";
 import { Spinner } from "../../ui/Spinner";
 import { ProviderEditorDialog } from "./ProviderEditorDialog";
-import { ProviderCard } from "./SortableProviderCard";
+import { SortableProviderCard } from "./SortableProviderCard";
 import { SortableProviderOrderItem } from "./SortableProviderOrderItem";
 import { useProvidersViewDataModel } from "./hooks/useProvidersViewDataModel";
 
@@ -54,6 +54,7 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
     duplicateProvider,
     requestValidateProviderModel,
     handleDragEnd,
+    handleProviderCardDragEnd,
     sensors,
     createDialogState,
     setCreateDialogState,
@@ -242,43 +243,54 @@ export function ProvidersView({ activeCli }: ProvidersViewProps) {
                 }
               />
             ) : (
-              <div className="space-y-3">
-                {filteredProviders.map((provider) => (
-                  <ProviderCard
-                    key={provider.id}
-                    provider={provider}
-                    sourceProviderName={
-                      provider.source_provider_id != null
-                        ? (sourceProviderNamesById[provider.source_provider_id] ?? null)
-                        : provider.bridge_type === "cx2cc"
-                          ? "当前 AIO 服务 Codex 网关"
-                          : undefined
-                    }
-                    sourceProvider={
-                      provider.source_provider_id != null
-                        ? (sourceProvidersById[provider.source_provider_id] ?? null)
-                        : null
-                    }
-                    circuit={circuitByProviderId[provider.id] ?? null}
-                    circuitResetting={Boolean(circuitResetting[provider.id]) || circuitLoading}
-                    onToggleEnabled={toggleProviderEnabled}
-                    onResetCircuit={resetCircuit}
-                    onCopyTerminalLaunchCommand={
-                      provider.cli_key === "claude" ? copyTerminalLaunchCommand : undefined
-                    }
-                    terminalLaunchCopying={Boolean(terminalCopyingByProviderId[provider.id])}
-                    onValidateModel={
-                      activeCli === "claude" ? requestValidateProviderModel : undefined
-                    }
-                    onTestAvailability={testProviderAvailability}
-                    testAvailabilityLoading={Boolean(testingByProviderId[provider.id])}
-                    onDuplicate={duplicateProvider}
-                    duplicateLoading={Boolean(duplicatingByProviderId[provider.id])}
-                    onEdit={setEditTarget}
-                    onDelete={setDeleteTarget}
-                  />
-                ))}
-              </div>
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleProviderCardDragEnd}
+              >
+                <SortableContext
+                  items={filteredProviders.map((provider) => provider.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className="space-y-3">
+                    {filteredProviders.map((provider) => (
+                      <SortableProviderCard
+                        key={provider.id}
+                        provider={provider}
+                        sourceProviderName={
+                          provider.source_provider_id != null
+                            ? (sourceProviderNamesById[provider.source_provider_id] ?? null)
+                            : provider.bridge_type === "cx2cc"
+                              ? "当前 AIO 服务 Codex 网关"
+                              : undefined
+                        }
+                        sourceProvider={
+                          provider.source_provider_id != null
+                            ? (sourceProvidersById[provider.source_provider_id] ?? null)
+                            : null
+                        }
+                        circuit={circuitByProviderId[provider.id] ?? null}
+                        circuitResetting={Boolean(circuitResetting[provider.id]) || circuitLoading}
+                        onToggleEnabled={toggleProviderEnabled}
+                        onResetCircuit={resetCircuit}
+                        onCopyTerminalLaunchCommand={
+                          provider.cli_key === "claude" ? copyTerminalLaunchCommand : undefined
+                        }
+                        terminalLaunchCopying={Boolean(terminalCopyingByProviderId[provider.id])}
+                        onValidateModel={
+                          activeCli === "claude" ? requestValidateProviderModel : undefined
+                        }
+                        onTestAvailability={testProviderAvailability}
+                        testAvailabilityLoading={Boolean(testingByProviderId[provider.id])}
+                        onDuplicate={duplicateProvider}
+                        duplicateLoading={Boolean(duplicatingByProviderId[provider.id])}
+                        onEdit={setEditTarget}
+                        onDelete={setDeleteTarget}
+                      />
+                    ))}
+                  </div>
+                </SortableContext>
+              </DndContext>
             )}
           </div>
 
